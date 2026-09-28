@@ -80,3 +80,23 @@ export type ProductionStage = {
   procurement_jobs: ProcurementJob;
   suppliers: Pick<Supplier, "id" | "name" | "active">;
 };
+
+export const freightStatuses = ["Not Planned", "Pending Booking", "Booking Confirmation", "Dispatched", "In Transit", "Completed"] as const;
+export const freightRisks = ["On Track", "Off Track"] as const;
+export type FreightStatus = (typeof freightStatuses)[number];
+export type FreightRisk = (typeof freightRisks)[number];
+
+export type FreightForwarder = { id: string; name: string; active: boolean; created_at: string; updated_at: string };
+export type FreightLocation = { id: string; name: string; country: string; location_type: "Seaport" | "Inland Terminal" | "Other"; usage: "Origin" | "Destination" | "Both"; active: boolean; created_at: string; updated_at: string };
+export type FreightReference = { id: string; procurement_job_id: string; production_stage_id: string; reference: string; created_at: string; updated_at: string };
+export type FreightBooking = {
+  id: string; procurement_job_id: string; production_stage_id: string; freight_reference_id: string; supplier_id: string;
+  shipment_reference: string; freight_po_number: string | null; container_quantity: number; special_request: string | null;
+  origin_location_id: string | null; destination_location_id: string | null; freight_forwarder_id: string | null;
+  sea_freight_rate_aud: number; local_charges_aud: number; total_freight_cost_aud: number; total_cost_override: boolean;
+  planned_etd: string | null; planned_eta: string | null; status: FreightStatus; risk: FreightRisk; comments: string | null;
+  allocation_override: boolean; archived_at: string | null; created_at: string; updated_at: string;
+  procurement_jobs: ProcurementJob; production_stages: ProductionStage; suppliers: Pick<Supplier, "id" | "name" | "active">;
+  freight_references: FreightReference; freight_forwarders: FreightForwarder | null;
+  origin: FreightLocation | null; destination: FreightLocation | null;
+};
