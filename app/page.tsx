@@ -1,8 +1,5 @@
-export default function Home() {
-  return (
-    <main className="home">
-      <h1>Bowen Supply Chain Control Tower</h1>
-    </main>
-  );
-}
+import { redirect } from "next/navigation";
 
+export default function Home() {
+  redirect("/suppliers");
+}
