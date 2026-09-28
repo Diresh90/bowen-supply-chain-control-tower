@@ -55,15 +55,16 @@ create or replace trigger freight_rates_set_updated_at before update on public.f
 for each row execute function public.set_updated_at();
 
 alter table public.freight_rates enable row level security;
-do $$ begin
-  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'freight_rates' and policyname = 'freight_rates_select') then
-    create policy freight_rates_select on public.freight_rates for select to anon, authenticated using (true);
-  end if;
-  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'freight_rates' and policyname = 'freight_rates_insert') then
-    create policy freight_rates_insert on public.freight_rates for insert to anon, authenticated with check (true);
-  end if;
-  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'freight_rates' and policyname = 'freight_rates_update') then
-    create policy freight_rates_update on public.freight_rates for update to anon, authenticated using (true) with check (true);
-  end if;
-end $$;
-grant select, insert, update on public.freight_rates to anon, authenticated;
+
+-- Match the access model used by the existing control-tower tables. The browser
+-- uses Supabase's anon key, while signed-in clients use the authenticated role.
+drop policy if exists "freight_rates_select" on public.freight_rates;
+create policy "freight_rates_select" on public.freight_rates for select to anon, authenticated using (true);
+drop policy if exists "freight_rates_insert" on public.freight_rates;
+create policy "freight_rates_insert" on public.freight_rates for insert to anon, authenticated with check (true);
+drop policy if exists "freight_rates_update" on public.freight_rates;
+create policy "freight_rates_update" on public.freight_rates for update to anon, authenticated using (true) with check (true);
+drop policy if exists "freight_rates_delete" on public.freight_rates;
+create policy "freight_rates_delete" on public.freight_rates for delete to anon, authenticated using (true);
+
+grant select, insert, update, delete on public.freight_rates to anon, authenticated;
