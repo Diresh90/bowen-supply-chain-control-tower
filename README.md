@@ -1,12 +1,18 @@
 # Bowen Supply Chain Control Tower
 
-Phase 1 stores approved suppliers and procurement jobs permanently in Supabase PostgreSQL. No browser or filesystem persistence is used.
+Approved suppliers, procurement jobs, and their child production stages are stored permanently in Supabase PostgreSQL. No browser or filesystem persistence is used.
 
 ## Database setup
 
 1. Open **Supabase → SQL Editor → New Query**.
 2. Copy the complete contents of [`supabase/migrations/20260928000000_phase_1_suppliers_procurement.sql`](supabase/migrations/20260928000000_phase_1_suppliers_procurement.sql), paste it into the editor, and run it.
 3. Confirm that `suppliers` and `procurement_jobs` appear in Table Editor.
+
+### Production additive migration
+
+After Phase 1 is installed, open a new SQL Editor query and run the complete contents of [`supabase/migrations/20260928010000_add_production_stages.sql`](supabase/migrations/20260928010000_add_production_stages.sql). This is an additive migration: it creates only `production_stages`, its indexes, validation trigger, permissions, and policies. It never resets, drops, truncates, reseeds, or recreates existing supplier or procurement tables.
+
+Each production stage has foreign keys to its parent `procurement_jobs` row and that job's approved `suppliers` row. The validation trigger locks the parent during allocation, requires the supplier to match, and prevents the summed stage quantities from exceeding `procurement_jobs.total_containers` unless the user explicitly confirms an allocation override.
 
 The migration is the complete, re-runnable SQL script. It creates both tables, their foreign key and constraints, automatic `updated_at` triggers, indexes, grants, and Phase 1 RLS policies. The supplier foreign key uses `ON DELETE RESTRICT`, so a supplier attached to a procurement job cannot be accidentally deleted; set it inactive to archive it instead.
 
