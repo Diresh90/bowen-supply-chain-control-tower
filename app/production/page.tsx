@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { Notice } from "@/components/notice";
 import { ProcurementJob, ProductionPriority, ProductionStage, productionPriorities, Supplier, SupplierCapacityOverride, SupplierProductionSetting } from "@/lib/database.types";
@@ -38,6 +39,7 @@ export default function ProductionPage() {
   const [capacitySettings, setCapacitySettings] = useState<SupplierProductionSetting[]>([]);
   const [capacityOverrides, setCapacityOverrides] = useState<SupplierCapacityOverride[]>([]);
   const [capacityReady, setCapacityReady] = useState(true);
+  const [freightAllocated, setFreightAllocated] = useState<Record<string, number>>({});
   const [supplierId, setSupplierId] = useState("all");
   const [tab, setTab] = useState<Tab>("available");
   const [form, setForm] = useState<StageForm>(emptyForm);
@@ -57,6 +59,10 @@ export default function ProductionPage() {
       ]);
       setJobs(jobRows.filter(job => job.status && visibleStatuses.has(job.status)));
       setStages(stageRows); setSuppliers(supplierRows);
+      try {
+        const freightRows = await supabaseRequest<{ production_stage_id: string; container_quantity: number }[]>("freight_bookings?select=production_stage_id,container_quantity&archived_at=is.null");
+        setFreightAllocated(freightRows.reduce<Record<string, number>>((totals, booking) => { totals[booking.production_stage_id] = (totals[booking.production_stage_id] || 0) + booking.container_quantity; return totals; }, {}));
+      } catch { setFreightAllocated({}); }
       try {
         const [settings, overrides] = await Promise.all([
           supabaseRequest<SupplierProductionSetting[]>("supplier_production_settings?select=*"),
@@ -131,7 +137,7 @@ export default function ProductionPage() {
     <div className="module-tabs" role="tablist"><button className={tab === "available" ? "selected" : ""} onClick={() => setTab("available")}>Available for Planning</button><button className={tab === "plan" ? "selected" : ""} onClick={() => setTab("plan")}>Production Plan</button><button className={tab === "capacity" ? "selected" : ""} onClick={() => setTab("capacity")}>Capacity</button></div>
 
     {tab === "available" && <AvailableJobs jobs={filteredJobs} allocatedByJob={allocatedByJob} loading={loading} onCreate={startAdd} />}
-    {tab === "plan" && <ProductionPlan stages={filteredStages} loading={loading} onEdit={startEdit} onDelete={remove} />}
+    {tab === "plan" && <><ProductionPlan stages={filteredStages} loading={loading} onEdit={startEdit} onDelete={remove} /><FreightAllocation stages={filteredStages} allocated={freightAllocated} /></>}
     {tab === "capacity" && <CapacityView supplierId={supplierId} suppliers={productionSuppliers} stages={filteredStages} settings={capacitySettings} overrides={capacityOverrides} ready={capacityReady} onRefresh={load} onMessage={setMessage} />}
 
     {open && <div className="modal-backdrop" onMouseDown={() => !saving && setOpen(false)}><div className="modal production-modal" role="dialog" aria-modal="true" aria-labelledby="stage-title" onMouseDown={e => e.stopPropagation()}><div className="modal-head"><div><p className="eyebrow">PRODUCTION STAGE</p><h2 id="stage-title">{editing ? "Edit stage" : "Create stage"}</h2><p className="modal-context">{selectedJob ? `${jobLabel(selectedJob)} · ${selectedJob.client_name}` : "Linked procurement plan"}</p></div><button className="icon-button" aria-label="Close" onClick={() => setOpen(false)}>×</button></div><form onSubmit={save}><div className="form-grid stage-form">
@@ -150,6 +156,10 @@ export default function ProductionPage() {
 
 function AvailableJobs({ jobs, allocatedByJob, loading, onCreate }: { jobs: ProcurementJob[]; allocatedByJob: Record<string, number>; loading: boolean; onCreate: (job: ProcurementJob) => void }) {
   return <section className="panel"><div className="panel-title"><div><h2>Available for planning</h2><p>Confirmed and in-production orders can be allocated. Completed and dispatched orders remain visible as history.</p></div></div><div className="table-wrap"><table className="planning-table"><thead><tr><th>Job / Sales Order</th><th>Client</th><th>Supplier</th><th>Supplier PO</th><th>Destination</th><th>Required On-Site</th><th>Total</th><th>Allocated</th><th>Remaining</th><th>Status</th><th /></tr></thead><tbody>{loading ? <tr><td colSpan={11} className="empty">Loading production source data…</td></tr> : jobs.length === 0 ? <tr><td colSpan={11} className="empty"><strong>No eligible procurement jobs</strong><span>Jobs appear here after leaving Awaiting Confirmation.</span></td></tr> : jobs.map(job => { const allocated = allocatedByJob[job.id] || 0; const remaining = job.total_containers === null ? null : job.total_containers - allocated; const canPlan = plannableStatuses.has(job.status || "") && !!job.supplier_id && (remaining === null || remaining > 0); return <tr key={job.id}><td><strong>{job.sales_order_number || "—"}</strong></td><td>{job.client_name}</td><td>{job.suppliers?.name || "—"}</td><td>{job.supplier_po_number || "—"}</td><td>—</td><td>{formatDate(job.required_onsite_date)}</td><td>{job.total_containers ?? "—"}</td><td>{allocated}</td><td><strong className={remaining !== null && remaining < 0 ? "negative" : "remaining"}>{remaining ?? "—"}</strong></td><td><span className="badge status">{job.status}</span></td><td className="actions"><button disabled={!canPlan} title={!canPlan ? "This job is not open for new production planning" : ""} onClick={() => onCreate(job)}>＋ Create stage</button></td></tr>; })}</tbody></table></div></section>;
+}
+
+function FreightAllocation({ stages, allocated }: { stages: ProductionStage[]; allocated: Record<string, number> }) {
+  return <section className="panel production-freight"><div className="panel-title"><div><h2>Freight allocation</h2><p>Production remains the source for freight. Create one or many bookings up to each stage total.</p></div></div><div className="table-wrap"><table><thead><tr><th>Production Stage</th><th>Job</th><th>Stage Containers</th><th>Allocated to Freight</th><th>Remaining for Freight</th><th /></tr></thead><tbody>{stages.map(stage => { const used = allocated[stage.id] || 0; const remaining = stage.container_quantity - used; return <tr key={stage.id}><td><strong>{stage.stage_reference}</strong></td><td>{stage.procurement_jobs.sales_order_number || stage.procurement_jobs.client_name}</td><td>{stage.container_quantity}</td><td>{used}</td><td className={remaining < 0 ? "negative" : "remaining"}><strong>{remaining}</strong></td><td className="actions">{remaining > 0 && <Link href={`/freight?stage=${stage.id}`}>＋ Create freight</Link>}</td></tr>; })}</tbody></table></div></section>;
 }
 
 function ProductionPlan({ stages, loading, onEdit, onDelete }: { stages: ProductionStage[]; loading: boolean; onEdit: (stage: ProductionStage) => void; onDelete: (stage: ProductionStage) => void }) {

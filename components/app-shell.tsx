@@ -9,7 +9,7 @@ const navigation = [
   ["/procurement", "▤", "Jobs"],
   ["/procurement", "▧", "Purchase Orders"],
   ["/production", "▦", "Production"],
-  ["#", "♧", "Freight"],
+  ["/freight", "♧", "Freight"],
   ["#", "▥", "Containers"],
   ["/suppliers", "♙", "Suppliers"],
   ["#", "♧", "Alerts"],
