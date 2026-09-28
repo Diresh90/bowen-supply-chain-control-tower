@@ -35,6 +35,17 @@ export const procurementStatuses = [
 
 export type ProcurementStatus = (typeof procurementStatuses)[number];
 
+// Kept in one place so this can be replaced by Project Manager master data later.
+export const projectManagers = [
+  "Estee Evens",
+  "Mo Talib",
+  "Lucky T",
+  "Calvin Jackson",
+  "Nick W",
+  "Cameron W",
+  "Diresh D",
+] as const;
+
 export type ProcurementJob = {
   id: string;
   client_name: string;
@@ -99,4 +110,27 @@ export type FreightBooking = {
   procurement_jobs: ProcurementJob; production_stages: ProductionStage; suppliers: Pick<Supplier, "id" | "name" | "active">;
   freight_references: FreightReference; freight_forwarders: FreightForwarder | null;
   origin: FreightLocation | null; destination: FreightLocation | null;
+};
+
+export type FreightRate = {
+  id: string;
+  rate_month: string;
+  origin_location_id: string | null;
+  origin_code: string;
+  destination_location_id: string | null;
+  container_type: string | null;
+  sea_freight_rate_original: number;
+  original_currency: string;
+  fx_rate_to_aud: number | null;
+  sea_freight_rate_aud: number | null;
+  local_charges_aud: number | null;
+  total_cost_aud: number | null;
+  freight_forwarder_id: string | null;
+  source_reference: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+  origin: FreightLocation | null;
+  destination: FreightLocation | null;
+  freight_forwarders: FreightForwarder | null;
 };
