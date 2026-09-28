@@ -1,13 +1,15 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { AppShell } from "@/components/app-shell";
 import { Notice } from "@/components/notice";
-import { ProcurementJob, ProductionPriority, ProductionStage, productionPriorities, Supplier } from "@/lib/database.types";
+import { ProcurementJob, ProductionPriority, ProductionStage, productionPriorities, Supplier, SupplierCapacityOverride, SupplierProductionSetting } from "@/lib/database.types";
 import { calculateProductionSchedule, dateKey, mondayOf } from "@/lib/production";
 import { configurationError, supabaseRequest } from "@/lib/supabase";
 
 const WEEK_MS = 7 * 86_400_000;
+const DAY_MS = 86_400_000;
+const WEEK_WIDTH = 60;
 const visibleStatuses = new Set(["Confirmed", "In Production", "Production Completed", "Fully Dispatched"]);
 const plannableStatuses = new Set(["Confirmed", "In Production"]);
 const emptyForm = {
@@ -33,6 +35,9 @@ export default function ProductionPage() {
   const [jobs, setJobs] = useState<ProcurementJob[]>([]);
   const [stages, setStages] = useState<ProductionStage[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [capacitySettings, setCapacitySettings] = useState<SupplierProductionSetting[]>([]);
+  const [capacityOverrides, setCapacityOverrides] = useState<SupplierCapacityOverride[]>([]);
+  const [capacityReady, setCapacityReady] = useState(true);
   const [supplierId, setSupplierId] = useState("all");
   const [tab, setTab] = useState<Tab>("available");
   const [form, setForm] = useState<StageForm>(emptyForm);
@@ -52,6 +57,13 @@ export default function ProductionPage() {
       ]);
       setJobs(jobRows.filter(job => job.status && visibleStatuses.has(job.status)));
       setStages(stageRows); setSuppliers(supplierRows);
+      try {
+        const [settings, overrides] = await Promise.all([
+          supabaseRequest<SupplierProductionSetting[]>("supplier_production_settings?select=*"),
+          supabaseRequest<SupplierCapacityOverride[]>("supplier_capacity_overrides?select=*&order=capacity_month.asc"),
+        ]);
+        setCapacitySettings(settings); setCapacityOverrides(overrides); setCapacityReady(true);
+      } catch { setCapacityReady(false); }
     } catch (error) { setMessage({ text: (error as Error).message, kind: "error" }); }
     finally { setLoading(false); }
   }, []);
@@ -120,7 +132,7 @@ export default function ProductionPage() {
 
     {tab === "available" && <AvailableJobs jobs={filteredJobs} allocatedByJob={allocatedByJob} loading={loading} onCreate={startAdd} />}
     {tab === "plan" && <ProductionPlan stages={filteredStages} loading={loading} onEdit={startEdit} onDelete={remove} />}
-    {tab === "capacity" && <section className="panel"><div className="panel-title"><div><h2>Supplier capacity</h2><p>The supplier filter is already applied and this section is reserved for future capacity records.</p></div></div><div className="empty"><strong>Capacity data is not configured yet</strong><span>Production planning is ready without creating Freight or speculative capacity data.</span></div></section>}
+    {tab === "capacity" && <CapacityView supplierId={supplierId} suppliers={productionSuppliers} stages={filteredStages} settings={capacitySettings} overrides={capacityOverrides} ready={capacityReady} onRefresh={load} onMessage={setMessage} />}
 
     {open && <div className="modal-backdrop" onMouseDown={() => !saving && setOpen(false)}><div className="modal production-modal" role="dialog" aria-modal="true" aria-labelledby="stage-title" onMouseDown={e => e.stopPropagation()}><div className="modal-head"><div><p className="eyebrow">PRODUCTION STAGE</p><h2 id="stage-title">{editing ? "Edit stage" : "Create stage"}</h2><p className="modal-context">{selectedJob ? `${jobLabel(selectedJob)} · ${selectedJob.client_name}` : "Linked procurement plan"}</p></div><button className="icon-button" aria-label="Close" onClick={() => setOpen(false)}>×</button></div><form onSubmit={save}><div className="form-grid stage-form">
       <label className="full">Procurement job<select required disabled={!!editing} value={form.procurement_job_id} onChange={e => { const job = jobs.find(item => item.id === e.target.value); setForm({ ...form, procurement_job_id: e.target.value, required_site_date: job?.required_onsite_date || "" }); }}><option value="">Select a job</option>{jobs.filter(job => plannableStatuses.has(job.status || "") && job.supplier_id).map(job => <option key={job.id} value={job.id}>{jobLabel(job)} — {job.client_name}</option>)}</select></label>
@@ -141,16 +153,69 @@ function AvailableJobs({ jobs, allocatedByJob, loading, onCreate }: { jobs: Proc
 }
 
 function ProductionPlan({ stages, loading, onEdit, onDelete }: { stages: ProductionStage[]; loading: boolean; onEdit: (stage: ProductionStage) => void; onDelete: (stage: ProductionStage) => void }) {
-  const anchor = useMemo(() => mondayOf(stages.length ? new Date(`${stages.reduce((min, stage) => stage.production_start < min ? stage.production_start : min, stages[0].production_start)}T00:00:00Z`) : new Date()), [stages]);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const earliest = stages.length ? stages.reduce((min, stage) => stage.production_start < min ? stage.production_start : min, stages[0].production_start) : dateKey(new Date());
+  const anchor = useMemo(() => {
+    const relevant = new Date(Math.min(new Date(`${earliest}T00:00:00Z`).getTime(), Date.now()));
+    const monday = mondayOf(relevant);
+    return new Date(monday.getTime() - (2 * WEEK_MS));
+  }, [earliest]);
   const weeks = useMemo(() => Array.from({ length: 52 }, (_, index) => new Date(anchor.getTime() + index * WEEK_MS)), [anchor]);
-  return <section className="panel gantt-panel"><div className="panel-title"><div><h2>Weekly production Gantt</h2><p>52 weeks · Monday starts · select a row to edit dates, durations, quantity, priority, or queue.</p></div><div className="gantt-legend"><span className="production">Production</span><span className="dispatch">Dispatch</span><span className="transit">Sea transit</span><span className="destination">Destination</span><span className="milestone">On-site</span></div></div><div className="gantt-scroll"><div className="gantt" style={{ "--weeks": weeks.length } as CSSProperties}><div className="gantt-head fixed-head"><span>Queue</span><span>Job / Order</span><span>Production Stage</span><span>Supplier</span><span>Destination</span><span>Containers</span><span>Production Start</span><span>Production Finish</span><span>Planned ETD</span><span>Port ETA</span><span>Forecast Site ETA</span><span>Required Site Date</span><span>Timing</span></div><div className="gantt-head weeks-head">{weeks.map(week => <div key={dateKey(week)}>{new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" }).format(week)}</div>)}</div>{loading ? <div className="gantt-empty">Loading production plan…</div> : stages.length === 0 ? <div className="gantt-empty"><strong>No production stages yet</strong><span>Create one from Available for Planning.</span></div> : stages.map(stage => <GanttRow key={stage.id} stage={stage} anchor={anchor} onEdit={onEdit} onDelete={onDelete} />)}</div></div></section>;
+  const scrollToDate = (date: Date) => scrollRef.current?.scrollTo({ left: Math.max(0, ((date.getTime() - anchor.getTime()) / WEEK_MS - 1) * WEEK_WIDTH), behavior: "smooth" });
+  useEffect(() => { scrollToDate(new Date(`${earliest}T00:00:00Z`)); }, [earliest, anchor]);
+  const move = (weeksToMove: number) => scrollRef.current?.scrollBy({ left: weeksToMove * WEEK_WIDTH, behavior: "smooth" });
+  const todayLeft = ((Date.now() - anchor.getTime()) / DAY_MS) * (WEEK_WIDTH / 7);
+  return <section className="panel gantt-panel"><div className="panel-title gantt-title"><div><h2>Weekly production Gantt</h2><p>52 weeks · Monday starts · daily-precision bars · select a row to edit.</p></div><div className="gantt-actions"><div className="gantt-legend"><span className="production">Production</span><span className="dispatch">Dispatch</span><span className="transit">Sea transit</span><span className="destination">Destination</span><span className="milestone">On-site</span></div><div className="timeline-controls"><button onClick={() => move(-4)}>← Previous</button><button onClick={() => scrollToDate(new Date())}>Today</button><button onClick={() => move(4)}>Next →</button></div></div></div>
+    <div className="gantt-board">
+      <div className="gantt-fixed"><div className="gantt-fixed-head"><span>Queue</span><span>Job / Order</span><span>Production Stage</span><span>Ctns</span><span>Destination</span><span>Required On-Site</span><span>Timing</span><span /></div>{loading ? <div className="gantt-side-empty">Loading plan…</div> : stages.map(stage => <StageDetails key={stage.id} stage={stage} onEdit={onEdit} onDelete={onDelete} />)}</div>
+      <div className="gantt-timeline" ref={scrollRef}><div className="timeline-canvas" style={{ "--weeks": weeks.length } as CSSProperties}><div className="weeks-head">{weeks.map(week => <div key={dateKey(week)}>{new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" }).format(week)}</div>)}</div><span className="today-line" style={{ left: todayLeft }} title={`Today · ${formatDate(dateKey(new Date()))}`} />{loading ? <div className="gantt-empty">Loading production plan…</div> : stages.length === 0 ? <div className="gantt-empty"><strong>No production stages yet</strong><span>Create one from Available for Planning.</span></div> : stages.map(stage => <GanttRow key={stage.id} stage={stage} anchor={anchor} onEdit={onEdit} />)}</div></div>
+    </div>
+  </section>;
 }
 
-function GanttRow({ stage, anchor, onEdit, onDelete }: { stage: ProductionStage; anchor: Date; onEdit: (stage: ProductionStage) => void; onDelete: (stage: ProductionStage) => void }) {
-  const start = new Date(`${stage.production_start}T00:00:00Z`);
-  const offset = (start.getTime() - anchor.getTime()) / WEEK_MS;
-  const segment = (className: string, left: number, width: number, label: string) => <span className={`phase ${className}`} style={{ left: `${left * 86}px`, width: `${Math.max(width * 86, 4)}px` }} title={label}>{width >= 1 ? label : ""}</span>;
-  return <><div className="stage-details" onClick={() => onEdit(stage)}><span className="queue">{stage.queue_sequence}</span><strong>{stage.procurement_jobs.sales_order_number || stage.procurement_jobs.client_name}</strong><span>{stage.stage_reference}</span><span>{stage.suppliers.name}</span><span>{stage.destination || "—"}</span><span>{stage.container_quantity}</span><span>{formatDate(stage.production_start)}</span><span>{formatDate(stage.production_finish)}</span><span>{formatDate(stage.planned_etd)}</span><span>{formatDate(stage.port_eta)}</span><span>{formatDate(stage.forecast_site_eta)}</span><span>{formatDate(stage.required_site_date)}</span><span className={`timing ${stage.timing_status.startsWith("Late") ? "late" : ""}`}>{stage.timing_status}</span><button className="row-delete" onClick={event => { event.stopPropagation(); void onDelete(stage); }} aria-label={`Delete ${stage.stage_reference}`}>×</button></div><div className="timeline-row" onClick={() => onEdit(stage)}>{segment("production", offset, stage.production_duration_weeks, "Production")}{segment("dispatch", offset + stage.production_duration_weeks, stage.dispatch_duration_weeks, "Dispatch")}{segment("transit", offset + stage.production_duration_weeks + stage.dispatch_duration_weeks, stage.transit_duration_weeks, "Sea transit")}{segment("destination", offset + stage.production_duration_weeks + stage.dispatch_duration_weeks + stage.transit_duration_weeks, stage.destination_duration_weeks, "Destination")}<span className="onsite" style={{ left: `${((new Date(`${stage.required_site_date}T00:00:00Z`).getTime() - anchor.getTime()) / WEEK_MS) * 86}px` }} title={`Required on-site ${formatDate(stage.required_site_date)}`} /></div></>;
+function StageDetails({ stage, onEdit, onDelete }: { stage: ProductionStage; onEdit: (stage: ProductionStage) => void; onDelete: (stage: ProductionStage) => void }) {
+  return <div className="stage-details" onClick={() => onEdit(stage)}><span className="queue">{stage.queue_sequence}</span><strong title={stage.procurement_jobs.client_name}>{stage.procurement_jobs.sales_order_number || stage.procurement_jobs.client_name}</strong><span title={stage.stage_reference}>{stage.stage_reference}</span><b>{stage.container_quantity}</b><span title={stage.destination || ""}>{stage.destination || "—"}</span><span>{formatDate(stage.required_site_date)}</span><span className={`timing ${stage.timing_status.startsWith("Late") ? "late" : ""}`}>{stage.timing_status}</span><button className="row-delete" onClick={event => { event.stopPropagation(); void onDelete(stage); }} aria-label={`Delete ${stage.stage_reference}`}>×</button></div>;
+}
+
+function GanttRow({ stage, anchor, onEdit }: { stage: ProductionStage; anchor: Date; onEdit: (stage: ProductionStage) => void }) {
+  const px = (value: string) => ((new Date(`${value}T00:00:00Z`).getTime() - anchor.getTime()) / DAY_MS) * (WEEK_WIDTH / 7);
+  const segment = (className: string, start: string, finish: string, label: string, weeks: number) => <span className={`phase ${className}`} style={{ left: px(start), width: Math.max(px(finish) - px(start), 4) }} title={`${label}\n${formatDate(start)} → ${formatDate(finish)}\n${weeks} week${weeks === 1 ? "" : "s"}`}>{weeks >= 1 ? label : ""}</span>;
+  return <div className="timeline-row" onClick={() => onEdit(stage)}>{segment("production", stage.production_start, stage.production_finish, "Production", stage.production_duration_weeks)}{segment("dispatch", stage.production_finish, stage.planned_etd, "Dispatch", stage.dispatch_duration_weeks)}{segment("transit", stage.planned_etd, stage.port_eta, "Sea transit", stage.transit_duration_weeks)}{segment("destination", stage.port_eta, stage.forecast_site_eta, "Destination", stage.destination_duration_weeks)}<span className="onsite" style={{ left: px(stage.forecast_site_eta) - 6 }} title={`On-site\n${formatDate(stage.forecast_site_eta)}`} /></div>;
+}
+
+function CapacityView({ supplierId, suppliers, stages, settings, overrides, ready, onRefresh, onMessage }: { supplierId: string; suppliers: Supplier[]; stages: ProductionStage[]; settings: SupplierProductionSetting[]; overrides: SupplierCapacityOverride[]; ready: boolean; onRefresh: () => Promise<void>; onMessage: (message: { text: string; kind: "error" | "success" } | null) => void }) {
+  const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const selectedSupplier = suppliers.find(supplier => supplier.id === supplierId);
+  const setting = settings.find(item => item.supplier_id === supplierId);
+  const [defaultCapacity, setDefaultCapacity] = useState("30");
+  useEffect(() => setDefaultCapacity(String(setting?.default_monthly_capacity ?? 30)), [setting, supplierId]);
+  const monthAnchor = useMemo(() => {
+    const relevant = stages.length ? stages.reduce((min, stage) => stage.planned_etd < min ? stage.planned_etd : min, stages[0].planned_etd) : dateKey(new Date());
+    const value = new Date(`${relevant}T00:00:00Z`);
+    return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), 1));
+  }, [stages]);
+  const months = useMemo(() => Array.from({ length: 12 }, (_, index) => new Date(Date.UTC(monthAnchor.getUTCFullYear(), monthAnchor.getUTCMonth() + index, 1))), [monthAnchor]);
+  const monthKey = (date: Date) => `${dateKey(date).slice(0, 7)}-01`;
+  const allocations = (key: string) => stages.filter(stage => stage.planned_etd.slice(0, 7) === key.slice(0, 7));
+  async function saveDefault() {
+    if (!selectedSupplier) return;
+    setSaving(true);
+    try {
+      await supabaseRequest("supplier_production_settings?on_conflict=supplier_id", { method: "POST", prefer: "resolution=merge-duplicates,return=representation", body: { supplier_id: supplierId, default_monthly_capacity: Number(defaultCapacity) } });
+      await onRefresh(); onMessage({ text: "Default monthly capacity saved.", kind: "success" });
+    } catch (error) { onMessage({ text: (error as Error).message, kind: "error" }); } finally { setSaving(false); }
+  }
+  async function saveOverride(key: string, value: string) {
+    setSaving(true);
+    try {
+      await supabaseRequest("supplier_capacity_overrides?on_conflict=supplier_id,capacity_month", { method: "POST", prefer: "resolution=merge-duplicates,return=representation", body: { supplier_id: supplierId, capacity_month: key, container_capacity: Number(value) } });
+      await onRefresh(); onMessage({ text: `Capacity override saved for ${formatDate(key)}.`, kind: "success" });
+    } catch (error) { onMessage({ text: (error as Error).message, kind: "error" }); } finally { setSaving(false); }
+  }
+  if (supplierId === "all") return <section className="panel"><div className="panel-title"><div><h2>Supplier capacity</h2><p>Capacity is supplier-specific and based on each stage&apos;s planned dispatch month.</p></div></div><div className="empty"><strong>Select a supplier to view capacity</strong><span>Use the Supplier selector at the top of Production.</span></div></section>;
+  if (!ready) return <section className="panel"><div className="panel-title"><div><h2>Supplier capacity</h2><p>Capacity storage has not been installed yet.</p></div></div><div className="empty"><strong>Capacity migration required</strong><span>Run 20260928020000_add_supplier_production_capacity.sql in Supabase. Existing production data is not changed.</span></div></section>;
+  return <section className="panel capacity-panel"><div className="panel-title capacity-heading"><div><h2>{selectedSupplier?.name} capacity</h2><p>Containers are allocated once, to the month containing Planned ETD / loading.</p></div><div className="capacity-setting"><label>Default monthly capacity<input min="0" type="number" value={defaultCapacity} onChange={event => setDefaultCapacity(event.target.value)} /></label><button className="primary" disabled={saving} onClick={saveDefault}>Save default</button></div></div><div className="capacity-grid">{months.map(month => { const key = monthKey(month); const rows = allocations(key); const allocated = rows.reduce((sum, stage) => sum + stage.container_quantity, 0); const override = overrides.find(item => item.supplier_id === supplierId && item.capacity_month === key); const capacity = override?.container_capacity ?? Number(defaultCapacity); const ratio = capacity === 0 ? (allocated ? Infinity : 1) : allocated / capacity; const status = ratio > 1 ? "Over capacity" : ratio === 1 ? "Full" : ratio >= .8 ? "Near capacity" : "Available"; const remaining = capacity - allocated; return <article className={`capacity-card ${status.toLowerCase().replace(" ", "-")}`} key={key}><button className="capacity-card-main" onClick={() => setSelectedMonth(selectedMonth === key ? null : key)}><span>{new Intl.DateTimeFormat("en-GB", { month: "long", year: "numeric", timeZone: "UTC" }).format(month)}</span><strong>{allocated} / {capacity} <small>containers</small></strong><i style={{ width: `${Math.min(ratio * 100, 100)}%` }} /><b>{remaining >= 0 ? `Remaining: ${remaining}` : `Over capacity: ${Math.abs(remaining)}`}</b><em>{status}</em></button><label className="override-field">Monthly override<input type="number" min="0" defaultValue={override?.container_capacity ?? ""} placeholder={String(setting?.default_monthly_capacity ?? 30)} onBlur={event => event.target.value && Number(event.target.value) !== override?.container_capacity && void saveOverride(key, event.target.value)} /></label>{selectedMonth === key && <div className="capacity-detail"><strong>Capacity allocation</strong>{rows.length ? rows.map(stage => <span key={stage.id}>{stage.procurement_jobs.sales_order_number || stage.procurement_jobs.client_name} · {stage.stage_reference}<b>{stage.container_quantity}</b></span>) : <span>No stages dispatching this month.</span>}<span className="capacity-total">Total<b>{allocated}</b></span></div>}</article>; })}</div></section>;
 }
 
 function SchedulePreview({ form }: { form: StageForm }) {

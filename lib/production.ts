@@ -32,7 +32,7 @@ export function calculateProductionSchedule(input: ProductionScheduleInput) {
     planned_etd: plannedEtd,
     port_eta: portEta,
     forecast_site_eta: forecastSiteEta,
-    timing_status: difference <= 0 ? "Within Target" : `Late ${difference} day${difference === 1 ? "" : "s"}`,
+    timing_status: difference <= 0 ? "Within target" : `Late ${difference} day${difference === 1 ? "" : "s"}`,
   };
 }
 

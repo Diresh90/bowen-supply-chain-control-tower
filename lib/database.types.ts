@@ -9,6 +9,22 @@ export type Supplier = {
   updated_at: string;
 };
 
+export type SupplierProductionSetting = {
+  supplier_id: string;
+  default_monthly_capacity: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SupplierCapacityOverride = {
+  id: string;
+  supplier_id: string;
+  capacity_month: string;
+  container_capacity: number;
+  created_at: string;
+  updated_at: string;
+};
+
 export const procurementStatuses = [
   "Awaiting Confirmation",
   "Confirmed",
