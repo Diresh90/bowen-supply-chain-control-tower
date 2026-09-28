@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 
@@ -23,8 +24,14 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="app-frame">
       <aside className="sidebar">
         <div className="brand">
-          <span className="brand-mark" aria-hidden="true"><i /><i /><i /><i /><i /><i /></span>
-          <span><strong>BOWEN</strong><small>STORAGE</small></span>
+          <Image
+            className="brand-logo"
+            src="/bowen-logo.svg"
+            alt="Bowen Engineered Storage Systems"
+            width={741}
+            height={227}
+            priority
+          />
         </div>
         <nav aria-label="Main navigation">
           {navigation.map(([href, icon, label], index) => (
