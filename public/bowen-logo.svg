@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 741 227" role="img" aria-labelledby="title description">
+  <title id="title">Bowen</title>
+  <desc id="description">Bowen Engineered Storage Systems</desc>
+  <defs>
+    <clipPath id="roundel">
+      <circle cx="113.5" cy="113.5" r="113.5" />
+    </clipPath>
+  </defs>
+  <g clip-path="url(#roundel)">
+    <path fill="#f51b25" d="M113.5 113.5 15.2 56.7A113.5 113.5 0 0 1 211.8 56.7Z" />
+    <path fill="#898a8d" d="m113.5 113.5-98.3-56.8a113.5 113.5 0 0 0 98.3 170.3Z" />
+    <path fill="#e7e0d4" d="m113.5 113.5 98.3-56.8A113.5 113.5 0 0 1 113.5 227Z" />
+  </g>
+  <text x="263" y="140" fill="#515154" font-family="Arial Black, Arial, sans-serif" font-size="136" font-weight="900" textLength="478" lengthAdjust="spacingAndGlyphs">BOWEN</text>
+  <text x="272" y="181" fill="#f51b25" font-family="Arial, sans-serif" font-size="28" font-weight="900" textLength="469" lengthAdjust="spacingAndGlyphs">ENGINEERED STORAGE SYSTEMS</text>
+</svg>
