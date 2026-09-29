@@ -46,3 +46,25 @@ export function mondayOf(date: Date) {
 export function dateKey(date: Date) {
   return date.toISOString().slice(0, 10);
 }
+
+export type CapacityStatus = "Capacity Not Set" | "Available" | "Near Capacity" | "Full" | "Over Capacity";
+
+export function capacityMonth(value: string | Date) {
+  const key = typeof value === "string" ? value : dateKey(value);
+  return `${key.slice(0, 7)}-01`;
+}
+
+export function capacityMetrics(capacity: number | null, planned: number) {
+  if (capacity === null) return { capacity, planned, remaining: null, utilisation: null, status: "Capacity Not Set" as CapacityStatus };
+  const utilisation = capacity === 0 ? (planned === 0 ? 0 : Infinity) : planned / capacity * 100;
+  const status: CapacityStatus = utilisation > 100 ? "Over Capacity" : utilisation === 100 ? "Full" : utilisation >= 80 ? "Near Capacity" : "Available";
+  return { capacity, planned, remaining: capacity - planned, utilisation, status };
+}
+
+export function plannedBySupplierMonth<T extends { supplier_id: string; planned_etd: string; container_quantity: number }>(stages: T[]) {
+  return stages.reduce<Record<string, number>>((totals, stage) => {
+    const key = `${stage.supplier_id}:${capacityMonth(stage.planned_etd)}`;
+    totals[key] = (totals[key] || 0) + stage.container_quantity;
+    return totals;
+  }, {});
+}
