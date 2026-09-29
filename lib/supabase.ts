@@ -18,18 +18,11 @@ export async function supabaseRequest<T>(path: string, options: RequestOptions =
   const configError = configurationError();
   if (configError) throw new Error(configError);
 
-  const sessionResponse = await fetch("/api/auth/session", { cache: "no-store" });
-  if (!sessionResponse.ok) {
-    window.location.assign("/login?message=session_expired");
-    throw new Error("Your session has expired. Please sign in again.");
-  }
-  const session = (await sessionResponse.json()) as { accessToken: string };
-
   const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
     method: options.method ?? "GET",
     headers: {
       apikey: supabaseKey!,
-      Authorization: `Bearer ${session.accessToken}`,
+      Authorization: `Bearer ${supabaseKey}`,
       "Content-Type": "application/json",
       Prefer: options.prefer ?? "return=representation",
     },
