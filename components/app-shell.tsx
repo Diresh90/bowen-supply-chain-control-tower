@@ -8,15 +8,12 @@ import type { ReactNode } from "react";
 const navigation = [
   ["/", "▣", "Dashboard"],
   ["/procurement", "▤", "Jobs"],
-  ["/procurement", "▧", "Purchase Orders"],
   ["/production", "▦", "Production"],
   ["/freight", "♧", "Freight"],
-  ["#", "▥", "Containers"],
   ["/suppliers", "♙", "Suppliers"],
-  ["#", "♧", "Alerts"],
-  ["#", "□", "Calendar"],
-  ["#", "◇", "Documents"],
 ] as const;
+
+const comingSoon = [["▥", "Containers"], ["♧", "Alerts / Actions"], ["□", "Calendar"], ["◇", "Documents"], ["⚙", "Settings"]] as const;
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -35,17 +32,18 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
         <nav aria-label="Main navigation">
           {navigation.map(([href, icon, label], index) => (
-            <Link key={`${label}-${index}`} className={(href === "/" ? pathname === "/" : pathname === href && label !== "Purchase Orders") ? "active" : ""} href={href}>
+            <Link key={`${label}-${index}`} className={(href === "/" ? pathname === "/" : pathname === href) ? "active" : ""} href={href}>
               <span>{icon}</span>{label}
             </Link>
           ))}
+          <section className="coming-soon-nav" aria-labelledby="coming-soon-heading">
+            <h2 id="coming-soon-heading">Coming Soon</h2>
+            {comingSoon.map(([icon, label]) => <button key={label} type="button" disabled aria-label={`${label} (Coming Soon)`}><span>{icon}</span><span className="coming-soon-label">{label}</span><small>Coming Soon</small></button>)}
+          </section>
         </nav>
-        <Link className="settings-link" href="#"><span>⚙</span> Settings <b>«</b></Link>
       </aside>
       <main className="content">
         <div className="topbar">
-          <div className="global-search">⌕ <input aria-label="Search" placeholder="Search jobs, PO, containers..." /></div>
-          <button className="top-icon" aria-label="Notifications">♧<em>3</em></button>
           <span className="user-name">Diresh</span>
           <span className="avatar" aria-label="User profile">D</span>
         </div>
