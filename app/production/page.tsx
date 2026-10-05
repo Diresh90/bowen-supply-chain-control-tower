@@ -11,6 +11,7 @@ import { configurationError, supabaseRequest } from "@/lib/supabase";
 const WEEK_MS = 7 * 86_400_000;
 const DAY_MS = 86_400_000;
 const WEEK_WIDTH = 60;
+const MAX_RANGE_MONTHS = 24;
 const visibleStatuses = new Set(["Confirmed", "In Production", "Production Completed", "Fully Dispatched"]);
 const plannableStatuses = new Set(["Confirmed", "In Production"]);
 const emptyForm = {
@@ -30,6 +31,20 @@ function formatDate(value: string | null) {
 
 function jobLabel(job: ProcurementJob) {
   return job.sales_order_number || job.client_name;
+}
+
+function utcDate(value: string) {
+  return new Date(`${value}T00:00:00Z`);
+}
+
+function addUtcMonths(date: Date, months: number) {
+  const result = new Date(date.getTime());
+  const day = result.getUTCDate();
+  result.setUTCDate(1);
+  result.setUTCMonth(result.getUTCMonth() + months);
+  const lastDay = new Date(Date.UTC(result.getUTCFullYear(), result.getUTCMonth() + 1, 0)).getUTCDate();
+  result.setUTCDate(Math.min(day, lastDay));
+  return result;
 }
 
 export default function ProductionPage() {
@@ -173,21 +188,69 @@ function FreightAllocation({ stages, allocated }: { stages: ProductionStage[]; a
 
 function ProductionPlan({ stages, loading, onEdit, onDelete }: { stages: ProductionStage[]; loading: boolean; onEdit: (stage: ProductionStage) => void; onDelete: (stage: ProductionStage) => void }) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const earliest = stages.length ? stages.reduce((min, stage) => stage.production_start < min ? stage.production_start : min, stages[0].production_start) : dateKey(new Date());
-  const anchor = useMemo(() => {
-    const relevant = new Date(Math.min(new Date(`${earliest}T00:00:00Z`).getTime(), Date.now()));
-    const monday = mondayOf(relevant);
-    return new Date(monday.getTime() - (2 * WEEK_MS));
-  }, [earliest]);
-  const weeks = useMemo(() => Array.from({ length: 52 }, (_, index) => new Date(anchor.getTime() + index * WEEK_MS)), [anchor]);
-  const scrollToDate = (date: Date) => scrollRef.current?.scrollTo({ left: Math.max(0, ((date.getTime() - anchor.getTime()) / WEEK_MS - 1) * WEEK_WIDTH), behavior: "smooth" });
-  useEffect(() => { scrollToDate(new Date(`${earliest}T00:00:00Z`)); }, [earliest, anchor]);
+  const today = dateKey(new Date());
+  const defaultEnd = dateKey(addUtcMonths(utcDate(today), 6));
+  const initialRange = { start: today, end: defaultEnd };
+  const [range, setRange] = useState(initialRange);
+  const [from, setFrom] = useState(initialRange.start);
+  const [to, setTo] = useState(initialRange.end);
+  const [rangeError, setRangeError] = useState("");
+  const start = utcDate(range.start);
+  const end = utcDate(range.end);
+  const endExclusive = new Date(end.getTime() + DAY_MS);
+  const totalDays = Math.max(1, (endExclusive.getTime() - start.getTime()) / DAY_MS);
+  const timelineWidth = totalDays * (WEEK_WIDTH / 7);
+  const weeks = useMemo(() => {
+    const values: Date[] = [];
+    for (let week = mondayOf(utcDate(range.start)); week <= utcDate(range.end); week = new Date(week.getTime() + WEEK_MS)) values.push(week);
+    return values;
+  }, [range]);
+  const months = useMemo(() => {
+    const values: { key: string; label: string; width: number }[] = [];
+    let cursor = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1));
+    while (cursor < endExclusive) {
+      const next = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1));
+      const visibleStart = Math.max(cursor.getTime(), start.getTime());
+      const visibleEnd = Math.min(next.getTime(), endExclusive.getTime());
+      values.push({ key: dateKey(cursor), label: new Intl.DateTimeFormat("en-GB", { month: "long", year: "numeric", timeZone: "UTC" }).format(cursor), width: ((visibleEnd - visibleStart) / DAY_MS) * (WEEK_WIDTH / 7) });
+      cursor = next;
+    }
+    return values;
+  }, [range]);
+  const visibleStages = useMemo(() => stages.filter(stage => stage.production_start <= range.end && stage.forecast_site_eta >= range.start), [stages, range]);
+  const outsideCount = stages.length - visibleStages.length;
+  const scrollToDate = (date: Date) => scrollRef.current?.scrollTo({ left: Math.max(0, ((date.getTime() - start.getTime()) / DAY_MS) * (WEEK_WIDTH / 7) - WEEK_WIDTH), behavior: "smooth" });
   const move = (weeksToMove: number) => scrollRef.current?.scrollBy({ left: weeksToMove * WEEK_WIDTH, behavior: "smooth" });
-  const todayLeft = ((Date.now() - anchor.getTime()) / DAY_MS) * (WEEK_WIDTH / 7);
-  return <section className="panel gantt-panel"><div className="panel-title gantt-title"><div><h2>Weekly production Gantt</h2><p>52 weeks · Monday starts · daily-precision bars · select a row to edit.</p></div><div className="gantt-actions"><div className="gantt-legend"><span className="production">Production</span><span className="dispatch">Dispatch</span><span className="transit">Sea transit</span><span className="destination">Destination</span><span className="milestone">On-site</span></div><div className="timeline-controls"><button onClick={() => move(-4)}>← Previous</button><button onClick={() => scrollToDate(new Date())}>Today</button><button onClick={() => move(4)}>Next →</button></div></div></div>
+  const todayVisible = today >= range.start && today <= range.end;
+  const todayLeft = ((utcDate(today).getTime() - start.getTime()) / DAY_MS) * (WEEK_WIDTH / 7);
+  function applyRange(nextStart = from, nextEnd = to) {
+    if (!nextStart || !nextEnd) { setRangeError("Please select both a From and To date."); return; }
+    const nextStartDate = utcDate(nextStart), nextEndDate = utcDate(nextEnd);
+    if (nextEndDate < nextStartDate) { setRangeError("To date must be on or after From date."); return; }
+    if (nextEndDate > addUtcMonths(nextStartDate, MAX_RANGE_MONTHS)) { setRangeError("Please select a date range of 24 months or less."); return; }
+    setRangeError(""); setFrom(nextStart); setTo(nextEnd); setRange({ start: nextStart, end: nextEnd });
+    sessionStorage.setItem("production-gantt-range", JSON.stringify({ start: nextStart, end: nextEnd }));
+    scrollRef.current?.scrollTo({ left: 0 });
+  }
+  function quickRange(monthsAhead: number | "year") {
+    const now = utcDate(today);
+    const nextStart = monthsAhead === "year" ? `${now.getUTCFullYear()}-01-01` : today;
+    const nextEnd = monthsAhead === "year" ? `${now.getUTCFullYear()}-12-31` : dateKey(addUtcMonths(now, monthsAhead));
+    applyRange(nextStart, nextEnd);
+  }
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem("production-gantt-range") || "null") as { start?: string; end?: string } | null;
+      if (saved?.start && saved?.end) applyRange(saved.start, saved.end);
+    } catch { /* Ignore an invalid browser preference and retain the safe default. */ }
+    // This preference is intentionally restored only when the Gantt first mounts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return <section className="panel gantt-panel"><div className="panel-title gantt-title"><div><h2>Weekly production Gantt</h2><p>Monday-based weeks · daily-precision bars · select a row to edit.</p></div><div className="gantt-actions"><div className="gantt-legend"><span className="production">Production</span><span className="dispatch">Dispatch</span><span className="transit">Sea transit</span><span className="destination">Destination</span><span className="milestone">On-site</span></div><div className="timeline-controls"><button onClick={() => move(-4)}>← Previous</button>{todayVisible && <button onClick={() => scrollToDate(utcDate(today))}>Today</button>}<button onClick={() => move(4)}>Next →</button></div></div></div>
+    <form className="gantt-range" onSubmit={event => { event.preventDefault(); applyRange(); }}><div className="gantt-date-fields"><label>From<input type="date" value={from} onChange={event => setFrom(event.target.value)} /></label><label>To<input type="date" value={to} onChange={event => setTo(event.target.value)} /></label><button className="primary" type="submit">Apply</button></div><div className="gantt-quick-ranges" aria-label="Quick date ranges"><button type="button" onClick={() => quickRange(3)}>3 Months</button><button type="button" onClick={() => quickRange(6)}>6 Months</button><button type="button" onClick={() => quickRange(12)}>12 Months</button><button type="button" onClick={() => quickRange("year")}>This Year</button></div>{rangeError && <p className="gantt-range-error" role="alert">{rangeError}</p>}<p className="gantt-range-summary">Showing {formatDate(range.start)} – {formatDate(range.end)}{outsideCount > 0 && ` · ${outsideCount} stage${outsideCount === 1 ? "" : "s"} outside selected range`}</p></form>
     <div className="gantt-board">
-      <div className="gantt-fixed"><div className="gantt-fixed-head"><span>Queue</span><span>Job / Order</span><span>Production Stage</span><span>Ctns</span><span>Destination</span><span>Required On-Site</span><span>Timing</span><span /></div>{loading ? <div className="gantt-side-empty">Loading plan…</div> : stages.map(stage => <StageDetails key={stage.id} stage={stage} onEdit={onEdit} onDelete={onDelete} />)}</div>
-      <div className="gantt-timeline" ref={scrollRef}><div className="timeline-canvas" style={{ "--weeks": weeks.length } as CSSProperties}><div className="weeks-head">{weeks.map(week => <div key={dateKey(week)}>{new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" }).format(week)}</div>)}</div><span className="today-line" style={{ left: todayLeft }} title={`Today · ${formatDate(dateKey(new Date()))}`} />{loading ? <div className="gantt-empty">Loading production plan…</div> : stages.length === 0 ? <div className="gantt-empty"><strong>No production stages yet</strong><span>Create one from Available for Planning.</span></div> : stages.map(stage => <GanttRow key={stage.id} stage={stage} anchor={anchor} onEdit={onEdit} />)}</div></div>
+      <div className="gantt-fixed"><div className="gantt-fixed-month-spacer" /><div className="gantt-fixed-head"><span>Queue</span><span>Job / Order</span><span>Production Stage</span><span>Ctns</span><span>Destination</span><span>Required On-Site</span><span>Timing</span><span /></div>{loading ? <div className="gantt-side-empty">Loading plan…</div> : visibleStages.map(stage => <StageDetails key={stage.id} stage={stage} onEdit={onEdit} onDelete={onDelete} />)}</div>
+      <div className="gantt-timeline" ref={scrollRef}><div className="timeline-canvas" style={{ width: timelineWidth } as CSSProperties}><div className="months-head">{months.map(month => <div key={month.key} style={{ width: month.width }}>{month.label}</div>)}</div><div className="weeks-head">{weeks.map(week => { const weekStart = Math.max(week.getTime(), start.getTime()); const weekEnd = Math.min(week.getTime() + WEEK_MS, endExclusive.getTime()); return <div key={dateKey(week)} style={{ width: ((weekEnd - weekStart) / DAY_MS) * (WEEK_WIDTH / 7) }}>W/C {new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" }).format(week)}</div>; })}</div>{todayVisible && <span className="today-line" style={{ left: todayLeft }} title={`Today · ${formatDate(today)}`} />}{loading ? <div className="gantt-empty">Loading production plan…</div> : visibleStages.length === 0 ? <div className="gantt-empty"><strong>No production stages in this date range</strong><span>Choose another range to see scheduled activity.</span></div> : visibleStages.map(stage => <GanttRow key={stage.id} stage={stage} rangeStart={range.start} rangeEnd={range.end} onEdit={onEdit} />)}</div></div>
     </div>
   </section>;
 }
@@ -196,10 +259,17 @@ function StageDetails({ stage, onEdit, onDelete }: { stage: ProductionStage; onE
   return <div className="stage-details" onClick={() => onEdit(stage)}><span className="queue">{stage.queue_sequence}</span><strong title={stage.procurement_jobs.client_name}>{stage.procurement_jobs.sales_order_number || stage.procurement_jobs.client_name}</strong><span title={stage.stage_reference}>{stage.stage_reference}</span><b>{stage.container_quantity}</b><span title={stage.destination || ""}>{stage.destination || "—"}</span><span>{formatDate(stage.required_site_date)}</span><span className={`timing ${stage.timing_status.startsWith("Late") ? "late" : ""}`}>{stage.timing_status}</span><button className="row-delete" onClick={event => { event.stopPropagation(); void onDelete(stage); }} aria-label={`Delete ${stage.stage_reference}`}>×</button></div>;
 }
 
-function GanttRow({ stage, anchor, onEdit }: { stage: ProductionStage; anchor: Date; onEdit: (stage: ProductionStage) => void }) {
-  const px = (value: string) => ((new Date(`${value}T00:00:00Z`).getTime() - anchor.getTime()) / DAY_MS) * (WEEK_WIDTH / 7);
-  const segment = (className: string, start: string, finish: string, label: string, weeks: number) => <span className={`phase ${className}`} style={{ left: px(start), width: Math.max(px(finish) - px(start), 4) }} title={`${label}\n${formatDate(start)} → ${formatDate(finish)}\n${weeks} week${weeks === 1 ? "" : "s"}`}>{weeks >= 1 ? label : ""}</span>;
-  return <div className="timeline-row" onClick={() => onEdit(stage)}>{segment("production", stage.production_start, stage.production_finish, "Production", stage.production_duration_weeks)}{segment("dispatch", stage.production_finish, stage.planned_etd, "Dispatch", stage.dispatch_duration_weeks)}{segment("transit", stage.planned_etd, stage.port_eta, "Sea transit", stage.transit_duration_weeks)}{segment("destination", stage.port_eta, stage.forecast_site_eta, "Destination", stage.destination_duration_weeks)}<span className="onsite" style={{ left: px(stage.forecast_site_eta) - 6 }} title={`On-site\n${formatDate(stage.forecast_site_eta)}`} /></div>;
+function GanttRow({ stage, rangeStart, rangeEnd, onEdit }: { stage: ProductionStage; rangeStart: string; rangeEnd: string; onEdit: (stage: ProductionStage) => void }) {
+  const anchor = utcDate(rangeStart), rangeFinish = new Date(utcDate(rangeEnd).getTime() + DAY_MS);
+  const px = (value: Date) => ((value.getTime() - anchor.getTime()) / DAY_MS) * (WEEK_WIDTH / 7);
+  const segment = (className: string, start: string, finish: string, label: string, weeks: number) => {
+    const visibleStart = new Date(Math.max(utcDate(start).getTime(), anchor.getTime()));
+    const visibleFinish = new Date(Math.min(utcDate(finish).getTime(), rangeFinish.getTime()));
+    if (visibleFinish <= visibleStart) return null;
+    return <span className={`phase ${className}`} style={{ left: px(visibleStart), width: Math.max(px(visibleFinish) - px(visibleStart), 4) }} title={`${label}\n${formatDate(start)} → ${formatDate(finish)}\n${weeks} week${weeks === 1 ? "" : "s"}`}>{weeks >= 1 ? label : ""}</span>;
+  };
+  const onsiteVisible = stage.forecast_site_eta >= rangeStart && stage.forecast_site_eta <= rangeEnd;
+  return <div className="timeline-row" onClick={() => onEdit(stage)}>{segment("production", stage.production_start, stage.production_finish, "Production", stage.production_duration_weeks)}{segment("dispatch", stage.production_finish, stage.planned_etd, "Dispatch", stage.dispatch_duration_weeks)}{segment("transit", stage.planned_etd, stage.port_eta, "Sea transit", stage.transit_duration_weeks)}{segment("destination", stage.port_eta, stage.forecast_site_eta, "Destination", stage.destination_duration_weeks)}{onsiteVisible && <span className="onsite" style={{ left: px(utcDate(stage.forecast_site_eta)) - 6 }} title={`On-site\n${formatDate(stage.forecast_site_eta)}`} />}</div>;
 }
 
 function CapacityView({ supplierId, suppliers, stages, overrides, ready, onEdit, onRefresh, onMessage }: { supplierId: string; suppliers: Supplier[]; stages: ProductionStage[]; settings: SupplierProductionSetting[]; overrides: SupplierCapacityOverride[]; ready: boolean; onEdit: (stage: ProductionStage) => void; onRefresh: () => Promise<void>; onMessage: (message: { text: string; kind: "error" | "success" } | null) => void }) {
