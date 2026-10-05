@@ -11,12 +11,10 @@ const navigation = [
   ["/procurement", "▧", "Purchase Orders"],
   ["/production", "▦", "Production"],
   ["/freight", "♧", "Freight"],
-  ["#", "▥", "Containers"],
   ["/suppliers", "♙", "Suppliers"],
-  ["#", "♧", "Alerts"],
-  ["#", "□", "Calendar"],
-  ["#", "◇", "Documents"],
 ] as const;
+
+const comingSoon = [["▥", "Containers"], ["♧", "Alerts / Actions"], ["□", "Calendar"], ["◇", "Documents"]] as const;
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -39,6 +37,10 @@ export function AppShell({ children }: { children: ReactNode }) {
               <span>{icon}</span>{label}
             </Link>
           ))}
+          <section className="coming-soon-nav" aria-labelledby="coming-soon-heading">
+            <h2 id="coming-soon-heading">Coming Soon</h2>
+            {comingSoon.map(([icon, label]) => <button key={label} type="button" disabled aria-label={`${label} (Coming Soon)`}><span>{icon}</span><span className="coming-soon-label">{label}</span><small>Coming Soon</small></button>)}
+          </section>
         </nav>
         <Link className="settings-link" href="#"><span>⚙</span> Settings <b>«</b></Link>
       </aside>
