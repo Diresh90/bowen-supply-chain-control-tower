@@ -8,7 +8,6 @@ import type { ReactNode } from "react";
 const navigation = [
   ["/", "▣", "Dashboard"],
   ["/procurement", "▤", "Jobs"],
-  ["/procurement", "▧", "Purchase Orders"],
   ["/production", "▦", "Production"],
   ["/freight", "♧", "Freight"],
   ["/suppliers", "♙", "Suppliers"],
@@ -32,8 +31,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           />
         </div>
         <nav aria-label="Main navigation">
-          {navigation.map(([href, icon, label], index) => (
-            <Link key={`${label}-${index}`} className={(href === "/" ? pathname === "/" : pathname === href && label !== "Purchase Orders") ? "active" : ""} href={href}>
+          {navigation.map(([href, icon, label]) => (
+            <Link key={label} className={(href === "/" ? pathname === "/" : pathname === href) ? "active" : ""} href={href}>
               <span>{icon}</span>{label}
             </Link>
           ))}
@@ -46,8 +45,6 @@ export function AppShell({ children }: { children: ReactNode }) {
       </aside>
       <main className="content">
         <div className="topbar">
-          <div className="global-search">⌕ <input aria-label="Search" placeholder="Search jobs, PO, containers..." /></div>
-          <button className="top-icon" aria-label="Notifications">♧<em>3</em></button>
           <span className="user-name">Diresh</span>
           <span className="avatar" aria-label="User profile">D</span>
         </div>
