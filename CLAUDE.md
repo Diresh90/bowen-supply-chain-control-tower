@@ -41,3 +41,4 @@ npm run typecheck  # tsc --noEmit
 
 - The app reads `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
 - In Vercel they are set for Preview and Production only, and marked Sensitive, so `vercel env pull` writes `[SENSITIVE]` placeholders. For local dev, put the real values in `.env.local` by hand (from Supabase → Project Settings → API).
+- `NEXT_PUBLIC_SUPABASE_URL` must be the bare project URL (`https://<ref>.supabase.co`), **not** the `.../rest/v1/` endpoint — `lib/supabase.ts` appends `/rest/v1/` itself, and a doubled path fails with "Invalid path specified in request URL".
