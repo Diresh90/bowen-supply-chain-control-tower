@@ -52,15 +52,17 @@ nav { padding:47px 9px 0; display:grid; gap:3px; } nav a,.settings-link { positi
 .db-kpi small{font-size:11px;color:#81909b}
 .db-kpi.red{border-left-color:#f13c42}.db-kpi.orange{border-left-color:#f4860a}.db-kpi.green{border-left-color:#20b466}.db-kpi.blue{border-left-color:#168cff}.db-kpi.purple{border-left-color:#7859dd}
 .db-attention{margin-bottom:14px}
-.db-attention-list{list-style:none;margin:0;padding:0 17px 12px}
-.db-attention-list li{display:grid;grid-template-columns:86px 1fr auto;gap:14px;align-items:center;padding:11px 0;border-top:1px solid #263642}
+.db-attention-list{list-style:none;margin:0 0 12px;padding:0 17px;max-height:252px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#2e4556 transparent}
+.db-attention-list::-webkit-scrollbar{width:8px}
+.db-attention-list::-webkit-scrollbar-thumb{background:#2e4556;border-radius:4px}
+.db-attention-list li{display:grid;grid-template-columns:86px 1fr auto;gap:14px;align-items:center;padding:8px 0;border-top:1px solid #263642}
+.db-count{display:inline-block;margin-left:8px;padding:2px 7px;border-radius:10px;background:#243645;color:#c8d0d7;font-size:11px;font-weight:600;vertical-align:1px}
 .db-attention-list li strong{display:block;font-size:13px;color:#f1f4f7;font-weight:600}
 .db-attention-list li small{display:block;margin-top:3px;font-size:11px;color:#81909b}
 .db-attention-list a{color:#52baff;text-decoration:none;font-size:12px;white-space:nowrap}
 .db-severity{display:inline-block;text-align:center;padding:4px 7px;border-radius:4px;font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.05em}
 .db-severity.high{background:#481b22;color:#ff7b80}.db-severity.medium{background:#442b0f;color:#ffad31}.db-severity.low{background:#293843;color:#aab6bf}
 .db-all-clear{padding:22px 17px;color:#6be5a1;font-size:13px}
-.db-more{margin:0 17px 14px;background:transparent;border:1px solid #1d2d3b;border-radius:6px;color:#52baff;padding:7px 12px;font-size:12px;cursor:pointer}
 .db-grid{display:grid;grid-template-columns:3fr 2fr;gap:14px;margin-bottom:14px}
 .db-pipeline,.db-status{position:relative;padding-bottom:44px}
 .db-panel-note{margin:-10px 17px 12px;color:#80909c;font-size:11px}

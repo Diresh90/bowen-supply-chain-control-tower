@@ -22,7 +22,6 @@ export default function Home() {
   const [loadedAt, setLoadedAt] = useState<Date | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [showAllAttention, setShowAllAttention] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true); setMessage(null);
@@ -62,7 +61,6 @@ export default function Home() {
   const maxStatus = Math.max(1, ...statusCounts.map(x => x.count));
   const show = (value: number | string) => (loading && !loadedAt ? "—" : value);
 
-  const visibleAttention = showAllAttention ? attention : attention.slice(0, 8);
   const query = search.trim().toLowerCase();
   const tableRows = summaries
     .filter(s => !query || [s.job.sales_order_number, s.job.client_name, s.job.supplier_po_number, s.job.project_manager, s.job.suppliers?.name].join(" ").toLowerCase().includes(query))
@@ -86,16 +84,15 @@ export default function Home() {
     </section>
 
     <section className="dash-panel db-attention">
-      <div className="all-jobs-title"><div><h2>Needs attention</h2><p>Worked out from the live production, freight and capacity data, so it catches statuses that are out of date.</p></div></div>
+      <div className="all-jobs-title"><div><h2>Needs attention{loadedAt && attention.length > 0 && <span className="db-count">{attention.length}</span>}</h2><p>Worked out from the live production, freight and capacity data, so it catches statuses that are out of date.</p></div></div>
       {loading && !loadedAt ? <div className="empty">Checking jobs…</div> : attention.length === 0 ? <div className="db-all-clear">✓ Nothing needs attention right now.</div> : <>
         <ul className="db-attention-list">
-          {visibleAttention.map(item => <li key={item.id} className={item.severity}>
+          {attention.map(item => <li key={item.id} className={item.severity}>
             <span className={`db-severity ${item.severity}`}>{severityLabel[item.severity]}</span>
             <div><strong>{item.title}</strong><small>{item.category} · {item.detail}</small></div>
             <Link href={item.href}>Open →</Link>
           </li>)}
         </ul>
-        {attention.length > 8 && <button className="db-more" onClick={() => setShowAllAttention(!showAllAttention)}>{showAllAttention ? "Show fewer" : `Show all ${attention.length}`}</button>}
       </>}
     </section>
 
