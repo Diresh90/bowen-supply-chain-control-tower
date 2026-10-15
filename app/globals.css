@@ -41,3 +41,54 @@ nav { padding:47px 9px 0; display:grid; gap:3px; } nav a,.settings-link { positi
 /* Production Gantt date window */
 .gantt-range{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;padding:12px 16px;border-top:1px solid #263743;background:#0d1922}.gantt-date-fields,.gantt-quick-ranges{display:flex;align-items:flex-end;gap:7px}.gantt-range label{display:grid;gap:4px;color:#82919d;font-size:8px;text-transform:uppercase;letter-spacing:.06em}.gantt-range input{color:#edf1f4;color-scheme:dark;background:#0a1620;border:1px solid #334754;border-radius:5px;padding:7px 8px}.gantt-range .primary{padding:8px 13px}.gantt-quick-ranges button{border:1px solid #314451;background:#142633;color:#cbd5dc;border-radius:4px;padding:8px 10px;font-size:9px}.gantt-quick-ranges button:hover{border-color:#168cff;color:#fff}.gantt-range-error{width:100%;margin:0;color:#ff969a;font-size:10px}.gantt-range-summary{margin:0 0 1px auto;color:#82919d;font-size:9px}.gantt-fixed-month-spacer,.months-head{height:27px;background:#101e28;border-bottom:1px solid #30414d}.months-head{display:flex;position:sticky;top:0;z-index:4}.months-head div{flex:none;padding:7px 6px;border-left:1px solid #3b5060;color:#c5d0d8;font-size:9px;font-weight:800;text-transform:uppercase;white-space:nowrap;overflow:hidden}.weeks-head{display:flex;grid-template-columns:none;top:27px}.weeks-head div{flex:none;padding:14px 5px;overflow:hidden}.gantt-fixed-head{position:sticky;top:27px;z-index:3}.timeline-canvas{min-width:1px}.timeline-row{background-size:60px 100%}
 @media(max-width:760px){.gantt-range{align-items:stretch}.gantt-date-fields{flex-wrap:wrap}.gantt-quick-ranges{overflow-x:auto}.gantt-range-summary{width:100%;margin-left:0}.gantt-fixed-month-spacer{height:27px}}
+
+/* Dashboard (needs-attention layout) */
+.db-subtitle{margin:6px 0 0;color:#80909c;font-size:12px}
+.db-kpis{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:12px;margin-bottom:14px}
+.db-kpi{padding:16px 17px;border:1px solid #21313e;border-left:3px solid #52baff;border-radius:8px;background:linear-gradient(145deg,#142330,#101d28)}
+.db-kpi span,.db-kpi strong,.db-kpi small{display:block}
+.db-kpi span{font-size:12px;color:#aeb8c2}
+.db-kpi strong{font-size:30px;margin:8px 0 6px;color:#f1f4f7}
+.db-kpi small{font-size:11px;color:#81909b}
+.db-kpi.red{border-left-color:#f13c42}.db-kpi.orange{border-left-color:#f4860a}.db-kpi.green{border-left-color:#20b466}.db-kpi.blue{border-left-color:#168cff}.db-kpi.purple{border-left-color:#7859dd}
+.db-attention{margin-bottom:14px}
+.db-attention-list{list-style:none;margin:0;padding:0 17px 12px}
+.db-attention-list li{display:grid;grid-template-columns:86px 1fr auto;gap:14px;align-items:center;padding:11px 0;border-top:1px solid #263642}
+.db-attention-list li strong{display:block;font-size:13px;color:#f1f4f7;font-weight:600}
+.db-attention-list li small{display:block;margin-top:3px;font-size:11px;color:#81909b}
+.db-attention-list a{color:#52baff;text-decoration:none;font-size:12px;white-space:nowrap}
+.db-severity{display:inline-block;text-align:center;padding:4px 7px;border-radius:4px;font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.05em}
+.db-severity.high{background:#481b22;color:#ff7b80}.db-severity.medium{background:#442b0f;color:#ffad31}.db-severity.low{background:#293843;color:#aab6bf}
+.db-all-clear{padding:22px 17px;color:#6be5a1;font-size:13px}
+.db-more{margin:0 17px 14px;background:transparent;border:1px solid #1d2d3b;border-radius:6px;color:#52baff;padding:7px 12px;font-size:12px;cursor:pointer}
+.db-grid{display:grid;grid-template-columns:3fr 2fr;gap:14px;margin-bottom:14px}
+.db-pipeline,.db-status{position:relative;padding-bottom:44px}
+.db-panel-note{margin:-10px 17px 12px;color:#80909c;font-size:11px}
+.db-pipe-row,.db-status-row{display:grid;grid-template-columns:170px 1fr 44px;gap:12px;align-items:center;padding:7px 17px}
+.db-status-row{grid-template-columns:160px 1fr 30px}
+.db-pipe-label span{display:block;font-size:12px;color:#d6dde3}
+.db-pipe-label small{display:block;font-size:10px;color:#81909b;margin-top:2px}
+.db-pipe-row strong,.db-status-row strong{text-align:right;font-size:15px;color:#f1f4f7}
+.db-status-row span{display:flex;align-items:center;gap:8px;font-size:12px;color:#d6dde3}
+.db-status-row i{width:9px;height:9px;border-radius:2px;display:inline-block}
+.db-pipe-bar{height:10px;border-radius:5px;background:#0e1b25;overflow:hidden}
+.db-pipe-bar span{display:block;height:100%;border-radius:5px;background:#168cff}
+.db-panel-link{position:absolute;right:18px;bottom:14px;color:#52baff;text-decoration:none;font-size:11px}
+.db-capacity-cell{display:flex;align-items:center;gap:10px}
+.db-table-tools{display:flex;align-items:center;gap:14px}
+.db-table-tools input{background:#0e1b25;border:1px solid #1d2d3b;border-radius:6px;color:#eef1f4;padding:8px 11px;font-size:12px;width:240px}
+.db-table-tools a{color:#52baff;text-decoration:none;font-size:12px;white-space:nowrap}
+.db-flag{display:inline!important;margin-right:6px;font-size:10px}
+.db-flag.high{color:#ff5b61}.db-flag.medium{color:#ffad31}.db-flag.low{color:#8b9aa6}
+.db-progress{min-width:190px}
+.db-progress-bar{position:relative;height:8px;border-radius:4px;background:#0e1b25;overflow:hidden}
+.db-progress-bar span{position:absolute;left:0;top:0;bottom:0;border-radius:4px}
+.db-progress-bar .planned,.db-legend .planned{background:#2e5a7d}
+.db-progress-bar .booked,.db-legend .booked{background:#168cff}
+.db-progress-bar .shipped,.db-legend .shipped{background:#20af63}
+.db-legend{margin:0;padding:10px 17px 14px;color:#80909c;font-size:10px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.db-legend span{display:inline-block;width:10px;height:6px;border-radius:3px;margin-left:6px}
+.all-jobs table{min-width:1000px}
+@media(max-width:1100px){.db-kpis{grid-template-columns:repeat(2,1fr)}.db-grid{grid-template-columns:1fr}}
+@media(max-width:760px){.db-attention-list li{grid-template-columns:1fr}.db-table-tools{flex-direction:column;align-items:flex-end}.db-table-tools input{width:100%}.db-pipe-row,.db-status-row{grid-template-columns:120px 1fr 36px}}
+@media(max-width:470px){.db-kpis{grid-template-columns:1fr}}
