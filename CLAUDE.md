@@ -21,6 +21,18 @@ npm run typecheck  # tsc --noEmit
 
 ## Workflow rules
 
+Every change follows these steps, in order:
+
+1. **Branch** — create `feature/<short-name>` from `main`. Never work directly on `main`.
+2. **Build and check locally** — `npm.cmd run typecheck`, then run the app (`.claude/launch.json` → `dev`) and verify the change against real data.
+3. **User review** — the user clicks through it locally and approves.
+4. **Preview deploy** — `vercel deploy` (preview) for a final check on Vercel.
+5. **Merge** — push the branch, open a PR, merge into `main` once approved.
+6. **Production** — `vercel deploy --prod` only after the user explicitly says yes.
+
+Notes:
+- Local dev currently points at the **live** Supabase database. Changes that only read data are safe to test; anything that writes, edits or deletes records must not be tested against live data until a separate test database is set up.
+- Database schema changes: show the user the migration SQL before it is run.
 - **Commit to local Git after every change.** One focused commit per change, with a clear message. Do not push to GitHub unless asked.
 - **Migrations are additive only.** Never drop, truncate, reset or reseed existing tables. New schema changes go in a new timestamped file in `supabase/migrations/`.
 - Never commit `.env*` (except `.env.example`) or `.vercel/` — both are gitignored.
