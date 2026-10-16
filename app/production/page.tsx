@@ -4,8 +4,8 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type CSSP
 import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { Notice } from "@/components/notice";
-import { ProcurementJob, ProductionPriority, ProductionStage, productionPriorities, Supplier, SupplierCapacityOverride, SupplierProductionSetting } from "@/lib/database.types";
-import { calculateProductionSchedule, capacityMetrics, capacityMonth, dateKey, mondayOf, plannedBySupplierMonth } from "@/lib/production";
+import { PlanningMode, ProcurementJob, ProductionPriority, ProductionStage, productionPriorities, Supplier, SupplierCapacityOverride, SupplierProductionSetting } from "@/lib/database.types";
+import { backwardDeadlines, calculateBackwardSchedule, calculateProductionSchedule, capacityMetrics, capacityMonth, dateKey, mondayOf, plannedBySupplierMonth } from "@/lib/production";
 import { configurationError, supabaseRequest } from "@/lib/supabase";
 
 const WEEK_MS = 7 * 86_400_000;
@@ -17,8 +17,9 @@ const plannableStatuses = new Set(["Confirmed", "In Production"]);
 const emptyForm = {
   procurement_job_id: "", stage_reference: "", container_quantity: "", priority: "Normal" as ProductionPriority,
   queue_sequence: "1", destination: "", production_start: "", production_duration_weeks: "5",
-  dispatch_duration_weeks: "1", transit_duration_weeks: "6", destination_duration_weeks: "1",
+  dispatch_duration_weeks: "2", transit_duration_weeks: "6", destination_duration_weeks: "1",
   required_site_date: "", allocation_override: false,
+  planning_mode: "backward" as PlanningMode, supplier_ready_date: "",
 };
 
 type Tab = "available" | "plan" | "capacity";
@@ -31,6 +32,21 @@ function formatDate(value: string | null) {
 
 function jobLabel(job: ProcurementJob) {
   return job.sales_order_number || job.client_name;
+}
+
+// Stock orders have no hard site deadline, so they are planned forward from production start.
+function isStockOrder(job: Pick<ProcurementJob, "client_name" | "sales_order_number"> | undefined) {
+  return !!job && /stock order/i.test(`${job.client_name} ${job.sales_order_number ?? ""}`);
+}
+
+function scheduleFor(form: StageForm) {
+  const weeks = { productionWeeks: Number(form.production_duration_weeks), dispatchWeeks: Number(form.dispatch_duration_weeks), transitWeeks: Number(form.transit_duration_weeks), destinationWeeks: Number(form.destination_duration_weeks) };
+  if (form.planning_mode === "backward") return calculateBackwardSchedule({ ...weeks, requiredSiteDate: form.required_site_date, supplierReadyDate: form.supplier_ready_date || null });
+  return { production_start: form.production_start, ...calculateProductionSchedule({ ...weeks, productionStart: form.production_start, requiredSiteDate: form.required_site_date }) };
+}
+
+function scheduleReady(form: StageForm) {
+  return !!form.required_site_date && (form.planning_mode === "backward" || !!form.production_start);
 }
 
 function utcDate(value: string) {
@@ -102,13 +118,21 @@ export default function ProductionPage() {
     const allocated = allocatedByJob[job.id] || 0;
     const remaining = Math.max(0, (job.total_containers || 0) - allocated);
     setEditing(null);
-    setForm({ ...emptyForm, procurement_job_id: job.id, stage_reference: `${job.client_name} Stage ${stages.filter(s => s.procurement_job_id === job.id).length + 1}`, container_quantity: remaining ? String(remaining) : "", queue_sequence: String(stages.length + 1), required_site_date: job.required_onsite_date || "" });
+    setForm({ ...emptyForm, procurement_job_id: job.id, stage_reference: `${job.client_name} Stage ${stages.filter(s => s.procurement_job_id === job.id).length + 1}`, container_quantity: remaining ? String(remaining) : "", queue_sequence: String(stages.length + 1), required_site_date: job.required_onsite_date || "", planning_mode: isStockOrder(job) ? "forward" : "backward" });
     setOpen(true); setMessage(null);
+  }
+
+  // Stages saved before planning modes existed default by order type. A project stage keeps its
+  // current ready date as the supplier date, so switching it to backward planning moves nothing.
+  function editModeFor(stage: ProductionStage) {
+    const planning_mode: PlanningMode = stage.planning_mode ?? (isStockOrder(stage.procurement_jobs) ? "forward" : "backward");
+    const supplier_ready_date = stage.supplier_ready_date ?? (planning_mode === "backward" && !stage.planning_mode ? stage.goods_ready_date : "");
+    return { planning_mode, supplier_ready_date };
   }
 
   function startEdit(stage: ProductionStage) {
     setEditing(stage);
-    setForm({ procurement_job_id: stage.procurement_job_id, stage_reference: stage.stage_reference, container_quantity: String(stage.container_quantity), priority: stage.priority, queue_sequence: String(stage.queue_sequence), destination: stage.destination || "", production_start: stage.production_start, production_duration_weeks: String(stage.production_duration_weeks), dispatch_duration_weeks: String(stage.dispatch_duration_weeks), transit_duration_weeks: String(stage.transit_duration_weeks), destination_duration_weeks: String(stage.destination_duration_weeks), required_site_date: stage.required_site_date, allocation_override: stage.allocation_override });
+    setForm({ procurement_job_id: stage.procurement_job_id, stage_reference: stage.stage_reference, container_quantity: String(stage.container_quantity), priority: stage.priority, queue_sequence: String(stage.queue_sequence), destination: stage.destination || "", production_start: stage.production_start, production_duration_weeks: String(stage.production_duration_weeks), dispatch_duration_weeks: String(stage.dispatch_duration_weeks), transit_duration_weeks: String(stage.transit_duration_weeks), destination_duration_weeks: String(stage.destination_duration_weeks), required_site_date: stage.required_site_date, allocation_override: stage.allocation_override, ...editModeFor(stage) });
     setOpen(true); setMessage(null);
   }
 
@@ -123,8 +147,8 @@ export default function ProductionPage() {
       setMessage({ text: `This stage would allocate ${allocatedElsewhere + quantity} of ${total} containers. Review the warning and confirm the override to continue.`, kind: "error" });
       return;
     }
-    const schedule = calculateProductionSchedule({ productionStart: form.production_start, productionWeeks: Number(form.production_duration_weeks), dispatchWeeks: Number(form.dispatch_duration_weeks), transitWeeks: Number(form.transit_duration_weeks), destinationWeeks: Number(form.destination_duration_weeks), requiredSiteDate: form.required_site_date });
-    const payload = { procurement_job_id: job.id, supplier_id: job.supplier_id, stage_reference: form.stage_reference.trim(), container_quantity: quantity, priority: form.priority, queue_sequence: Number(form.queue_sequence), destination: form.destination.trim() || null, production_start: form.production_start, production_duration_weeks: Number(form.production_duration_weeks), dispatch_duration_weeks: Number(form.dispatch_duration_weeks), transit_duration_weeks: Number(form.transit_duration_weeks), destination_duration_weeks: Number(form.destination_duration_weeks), required_site_date: form.required_site_date, allocation_override: form.allocation_override, ...schedule };
+    const schedule = scheduleFor(form);
+    const payload = { procurement_job_id: job.id, supplier_id: job.supplier_id, stage_reference: form.stage_reference.trim(), container_quantity: quantity, priority: form.priority, queue_sequence: Number(form.queue_sequence), destination: form.destination.trim() || null, production_duration_weeks: Number(form.production_duration_weeks), dispatch_duration_weeks: Number(form.dispatch_duration_weeks), transit_duration_weeks: Number(form.transit_duration_weeks), destination_duration_weeks: Number(form.destination_duration_weeks), required_site_date: form.required_site_date, allocation_override: form.allocation_override, planning_mode: form.planning_mode, supplier_ready_date: form.planning_mode === "backward" ? form.supplier_ready_date || null : null, ...schedule };
     setSaving(true); setMessage(null);
     try {
       if (editing) await supabaseRequest(`production_stages?id=eq.${editing.id}`, { method: "PATCH", body: payload });
@@ -145,8 +169,8 @@ export default function ProductionPage() {
   const proposedAllocation = otherAllocation + (Number(form.container_quantity) || 0);
   const exceedsTotal = selectedJob?.total_containers !== null && selectedJob?.total_containers !== undefined && proposedAllocation > selectedJob.total_containers;
   const capacityForecast = useMemo(() => {
-    if (!selectedJob?.supplier_id || !form.production_start || !form.required_site_date) return null;
-    const schedule = calculateProductionSchedule({ productionStart: form.production_start, productionWeeks: Number(form.production_duration_weeks), dispatchWeeks: Number(form.dispatch_duration_weeks), transitWeeks: Number(form.transit_duration_weeks), destinationWeeks: Number(form.destination_duration_weeks), requiredSiteDate: form.required_site_date });
+    if (!selectedJob?.supplier_id || !scheduleReady(form)) return null;
+    const schedule = scheduleFor(form);
     const month = capacityMonth(schedule.planned_etd);
     const capacity = capacityOverrides.find(row => row.supplier_id === selectedJob.supplier_id && row.capacity_month === month)?.container_capacity ?? null;
     const alreadyPlanned = stages.filter(stage => stage.supplier_id === selectedJob.supplier_id && capacityMonth(stage.planned_etd) === month && stage.id !== editing?.id).reduce((sum, stage) => sum + stage.container_quantity, 0);
@@ -164,16 +188,25 @@ export default function ProductionPage() {
     {tab === "capacity" && <CapacityView supplierId={supplierId} suppliers={productionSuppliers} stages={stages} settings={capacitySettings} overrides={capacityOverrides} ready={capacityReady} onEdit={startEdit} onRefresh={load} onMessage={setMessage} />}
 
     {open && <div className="modal-backdrop" onMouseDown={() => !saving && setOpen(false)}><div className="modal production-modal" role="dialog" aria-modal="true" aria-labelledby="stage-title" onMouseDown={e => e.stopPropagation()}><div className="modal-head"><div><p className="eyebrow">PRODUCTION STAGE</p><h2 id="stage-title">{editing ? "Edit stage" : "Create stage"}</h2><p className="modal-context">{selectedJob ? `${jobLabel(selectedJob)} · ${selectedJob.client_name}` : "Linked procurement plan"}</p></div><button className="icon-button" aria-label="Close" onClick={() => setOpen(false)}>×</button></div><form onSubmit={save}><div className="form-grid stage-form">
-      <label className="full">Procurement job<select required disabled={!!editing} value={form.procurement_job_id} onChange={e => { const job = jobs.find(item => item.id === e.target.value); setForm({ ...form, procurement_job_id: e.target.value, required_site_date: job?.required_onsite_date || "" }); }}><option value="">Select a job</option>{jobs.filter(job => plannableStatuses.has(job.status || "") && job.supplier_id).map(job => <option key={job.id} value={job.id}>{jobLabel(job)} — {job.client_name}</option>)}</select></label>
+      <label className="full">Procurement job<select required disabled={!!editing} value={form.procurement_job_id} onChange={e => { const job = jobs.find(item => item.id === e.target.value); setForm({ ...form, procurement_job_id: e.target.value, required_site_date: job?.required_onsite_date || "", planning_mode: isStockOrder(job) ? "forward" : "backward" }); }}><option value="">Select a job</option>{jobs.filter(job => plannableStatuses.has(job.status || "") && job.supplier_id).map(job => <option key={job.id} value={job.id}>{jobLabel(job)} — {job.client_name}</option>)}</select></label>
       <label>Stage reference *<input required value={form.stage_reference} onChange={e => setForm({...form, stage_reference:e.target.value})} /></label><label>Container quantity *<input required type="number" min="1" value={form.container_quantity} onChange={e => setForm({...form, container_quantity:e.target.value})} /></label>
-      <label>Priority<select value={form.priority} onChange={e => setForm({...form, priority:e.target.value as ProductionPriority})}>{productionPriorities.map(priority => <option key={priority}>{priority}</option>)}</select></label><label>Queue sequence<input required type="number" min="1" value={form.queue_sequence} onChange={e => setForm({...form, queue_sequence:e.target.value})} /></label>
+      <div className="planning-mode full"><strong>{form.planning_mode === "backward" ? "Project order · planned back from the on-site date" : "Stock order · planned forward from production start"}</strong><span>{form.planning_mode === "backward" ? "Enter the supplier's committed ready date to see if the stage is on time." : "Enter when production starts to see when it lands."}</span></div>
+      <label>Required on-site date *<input required type="date" value={form.required_site_date} onChange={e => setForm({...form, required_site_date:e.target.value})} /></label>
+      {form.planning_mode === "backward"
+        ? <label>Supplier committed ready date<input type="date" value={form.supplier_ready_date} onChange={e => setForm({...form, supplier_ready_date:e.target.value})} /></label>
+        : <label>Production start *<input required type="date" value={form.production_start} onChange={e => setForm({...form, production_start:e.target.value})} /></label>}
       <label className="full">Destination<input value={form.destination} onChange={e => setForm({...form, destination:e.target.value})} placeholder="Optional destination" /></label>
-      <label>Production start *<input required type="date" value={form.production_start} onChange={e => setForm({...form, production_start:e.target.value})} /></label><label>Production duration (weeks)<input required type="number" min="0" value={form.production_duration_weeks} onChange={e => setForm({...form, production_duration_weeks:e.target.value})} /></label>
-      <label>Dispatch duration (weeks)<input required type="number" min="0" value={form.dispatch_duration_weeks} onChange={e => setForm({...form, dispatch_duration_weeks:e.target.value})} /></label><label>Sea transit duration (weeks)<input required type="number" min="0" value={form.transit_duration_weeks} onChange={e => setForm({...form, transit_duration_weeks:e.target.value})} /></label>
-      <label>Destination duration (weeks)<input required type="number" min="0" value={form.destination_duration_weeks} onChange={e => setForm({...form, destination_duration_weeks:e.target.value})} /></label><label>Required on-site date *<input required type="date" value={form.required_site_date} onChange={e => setForm({...form, required_site_date:e.target.value})} /></label>
+      {scheduleReady(form) && <SchedulePreview form={form} />}
+      <details className="adjust-timings full"><summary>Adjust timings, priority and queue</summary><div className="form-grid">
+        <label>Production (weeks)<input required type="number" min="0" value={form.production_duration_weeks} onChange={e => setForm({...form, production_duration_weeks:e.target.value})} /></label>
+        <label>Dispatch: loading + origin transport (weeks)<input required type="number" min="0" value={form.dispatch_duration_weeks} onChange={e => setForm({...form, dispatch_duration_weeks:e.target.value})} /></label>
+        <label>Sea transit (weeks)<input required type="number" min="0" value={form.transit_duration_weeks} onChange={e => setForm({...form, transit_duration_weeks:e.target.value})} /></label>
+        <label>Delivery to site (weeks)<input required type="number" min="0" value={form.destination_duration_weeks} onChange={e => setForm({...form, destination_duration_weeks:e.target.value})} /></label>
+        <label>Priority<select value={form.priority} onChange={e => setForm({...form, priority:e.target.value as ProductionPriority})}>{productionPriorities.map(priority => <option key={priority}>{priority}</option>)}</select></label><label>Queue sequence<input required type="number" min="1" value={form.queue_sequence} onChange={e => setForm({...form, queue_sequence:e.target.value})} /></label>
+        <label className="full">Planning method<select value={form.planning_mode} onChange={e => setForm({...form, planning_mode:e.target.value as PlanningMode})}><option value="backward">Project order: plan back from on-site date</option><option value="forward">Stock order: plan forward from production start</option></select></label>
+      </div></details>
       {exceedsTotal && <div className="allocation-warning full"><strong>Allocation warning</strong><span>This saves {proposedAllocation} containers against a procurement total of {selectedJob?.total_containers}. An explicit override is required.</span><label className="check"><input type="checkbox" checked={form.allocation_override} onChange={e => setForm({...form, allocation_override:e.target.checked})} /> Confirm allocation override</label></div>}
       {capacityForecast && <div className={`capacity-warning full ${capacityForecast.metrics.status === "Over Capacity" ? "danger" : ""}`}><strong>{formatDate(capacityForecast.month)} supplier capacity</strong><span>Capacity: {capacityForecast.capacity ?? "Not set"} · Already planned: {capacityForecast.alreadyPlanned} · This stage: {capacityForecast.stage} · Forecast: {capacityForecast.metrics.planned}</span>{capacityForecast.capacity !== null && <b>{capacityForecast.metrics.remaining! < 0 ? `OVER CAPACITY BY ${Math.abs(capacityForecast.metrics.remaining!)} CONTAINERS` : `Remaining after stage: ${capacityForecast.metrics.remaining}`}</b>}</div>}
-      {form.production_start && form.required_site_date && <SchedulePreview form={form} />}
     </div><div className="modal-actions"><button type="button" className="secondary" onClick={() => setOpen(false)}>Cancel</button><button className="primary" disabled={saving}>{saving ? "Saving to Supabase…" : "Save production stage"}</button></div></form></div></div>}
   </AppShell>;
 }
@@ -246,7 +279,7 @@ function ProductionPlan({ stages, loading, onEdit, onDelete }: { stages: Product
     // This preference is intentionally restored only when the Gantt first mounts.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  return <section className="panel gantt-panel"><div className="panel-title gantt-title"><div><h2>Weekly production Gantt</h2><p>Monday-based weeks · daily-precision bars · select a row to edit.</p></div><div className="gantt-actions"><div className="gantt-legend"><span className="production">Production</span><span className="dispatch">Dispatch</span><span className="transit">Sea transit</span><span className="destination">Destination</span><span className="milestone">On-site</span></div><div className="timeline-controls"><button onClick={() => move(-4)}>← Previous</button>{todayVisible && <button onClick={() => scrollToDate(utcDate(today))}>Today</button>}<button onClick={() => move(4)}>Next →</button></div></div></div>
+  return <section className="panel gantt-panel"><div className="panel-title gantt-title"><div><h2>Weekly production Gantt</h2><p>Monday-based weeks · daily-precision bars · select a row to edit.</p></div><div className="gantt-actions"><div className="gantt-legend"><span className="production">Production</span><span className="dispatch">Dispatch</span><span className="transit">Sea transit</span><span className="destination">Destination</span><span className="milestone">Forecast on-site</span><span className="required">Required on-site</span></div><div className="timeline-controls"><button onClick={() => move(-4)}>← Previous</button>{todayVisible && <button onClick={() => scrollToDate(utcDate(today))}>Today</button>}<button onClick={() => move(4)}>Next →</button></div></div></div>
     <form className="gantt-range" onSubmit={event => { event.preventDefault(); applyRange(); }}><div className="gantt-date-fields"><label>From<input type="date" value={from} onChange={event => setFrom(event.target.value)} /></label><label>To<input type="date" value={to} onChange={event => setTo(event.target.value)} /></label><button className="primary" type="submit">Apply</button></div><div className="gantt-quick-ranges" aria-label="Quick date ranges"><button type="button" onClick={() => quickRange(3)}>3 Months</button><button type="button" onClick={() => quickRange(6)}>6 Months</button><button type="button" onClick={() => quickRange(12)}>12 Months</button><button type="button" onClick={() => quickRange("year")}>This Year</button></div>{rangeError && <p className="gantt-range-error" role="alert">{rangeError}</p>}<p className="gantt-range-summary">Showing {formatDate(range.start)} – {formatDate(range.end)}{outsideCount > 0 && ` · ${outsideCount} stage${outsideCount === 1 ? "" : "s"} outside selected range`}</p></form>
     <div className="gantt-board">
       <div className="gantt-fixed"><div className="gantt-fixed-month-spacer" /><div className="gantt-fixed-head"><span>Queue</span><span>Job / Order</span><span>Production Stage</span><span>Ctns</span><span>Destination</span><span>Required On-Site</span><span>Timing</span><span /></div>{loading ? <div className="gantt-side-empty">Loading plan…</div> : visibleStages.map(stage => <StageDetails key={stage.id} stage={stage} onEdit={onEdit} onDelete={onDelete} />)}</div>
@@ -256,7 +289,7 @@ function ProductionPlan({ stages, loading, onEdit, onDelete }: { stages: Product
 }
 
 function StageDetails({ stage, onEdit, onDelete }: { stage: ProductionStage; onEdit: (stage: ProductionStage) => void; onDelete: (stage: ProductionStage) => void }) {
-  return <div className="stage-details" onClick={() => onEdit(stage)}><span className="queue">{stage.queue_sequence}</span><strong title={stage.procurement_jobs.client_name}>{stage.procurement_jobs.sales_order_number || stage.procurement_jobs.client_name}</strong><span title={stage.stage_reference}>{stage.stage_reference}</span><b>{stage.container_quantity}</b><span title={stage.destination || ""}>{stage.destination || "—"}</span><span>{formatDate(stage.required_site_date)}</span><span className={`timing ${stage.timing_status.startsWith("Late") ? "late" : ""}`}>{stage.timing_status}</span><button className="row-delete" onClick={event => { event.stopPropagation(); void onDelete(stage); }} aria-label={`Delete ${stage.stage_reference}`}>×</button></div>;
+  return <div className="stage-details" onClick={() => onEdit(stage)}><span className="queue">{stage.queue_sequence}</span><strong title={stage.procurement_jobs.client_name}>{stage.procurement_jobs.sales_order_number || stage.procurement_jobs.client_name}</strong><span title={stage.stage_reference}>{stage.stage_reference}</span><b>{stage.container_quantity}</b><span title={stage.destination || ""}>{stage.destination || "—"}</span><span>{formatDate(stage.required_site_date)}</span><span className={`timing ${timingClass(stage.timing_status)}`} title={stage.planning_mode === "backward" ? "Planned back from the on-site date" : "Planned forward from production start"}>{stage.timing_status}</span><button className="row-delete" onClick={event => { event.stopPropagation(); void onDelete(stage); }} aria-label={`Delete ${stage.stage_reference}`}>×</button></div>;
 }
 
 function GanttRow({ stage, rangeStart, rangeEnd, onEdit }: { stage: ProductionStage; rangeStart: string; rangeEnd: string; onEdit: (stage: ProductionStage) => void }) {
@@ -269,7 +302,8 @@ function GanttRow({ stage, rangeStart, rangeEnd, onEdit }: { stage: ProductionSt
     return <span className={`phase ${className}`} style={{ left: px(visibleStart), width: Math.max(px(visibleFinish) - px(visibleStart), 4) }} title={`${label}\n${formatDate(start)} → ${formatDate(finish)}\n${weeks} week${weeks === 1 ? "" : "s"}`}>{weeks >= 1 ? label : ""}</span>;
   };
   const onsiteVisible = stage.forecast_site_eta >= rangeStart && stage.forecast_site_eta <= rangeEnd;
-  return <div className="timeline-row" onClick={() => onEdit(stage)}>{segment("production", stage.production_start, stage.production_finish, "Production", stage.production_duration_weeks)}{segment("dispatch", stage.production_finish, stage.planned_etd, "Dispatch", stage.dispatch_duration_weeks)}{segment("transit", stage.planned_etd, stage.port_eta, "Sea transit", stage.transit_duration_weeks)}{segment("destination", stage.port_eta, stage.forecast_site_eta, "Destination", stage.destination_duration_weeks)}{onsiteVisible && <span className="onsite" style={{ left: px(utcDate(stage.forecast_site_eta)) - 6 }} title={`On-site\n${formatDate(stage.forecast_site_eta)}`} />}</div>;
+  const requiredVisible = stage.required_site_date >= rangeStart && stage.required_site_date <= rangeEnd;
+  return <div className="timeline-row" onClick={() => onEdit(stage)}>{requiredVisible && <span className="required-marker" style={{ left: px(utcDate(stage.required_site_date)) }} title={`Required on site\n${formatDate(stage.required_site_date)}`} />}{segment("production", stage.production_start, stage.production_finish, "Production", stage.production_duration_weeks)}{segment("dispatch", stage.production_finish, stage.planned_etd, "Dispatch", stage.dispatch_duration_weeks)}{segment("transit", stage.planned_etd, stage.port_eta, "Sea transit", stage.transit_duration_weeks)}{segment("destination", stage.port_eta, stage.forecast_site_eta, "Destination", stage.destination_duration_weeks)}{onsiteVisible && <span className="onsite" style={{ left: px(utcDate(stage.forecast_site_eta)) - 6 }} title={`On-site\n${formatDate(stage.forecast_site_eta)}`} />}</div>;
 }
 
 function CapacityView({ supplierId, suppliers, stages, overrides, ready, onEdit, onRefresh, onMessage }: { supplierId: string; suppliers: Supplier[]; stages: ProductionStage[]; settings: SupplierProductionSetting[]; overrides: SupplierCapacityOverride[]; ready: boolean; onEdit: (stage: ProductionStage) => void; onRefresh: () => Promise<void>; onMessage: (message: { text: string; kind: "error" | "success" } | null) => void }) {
@@ -300,7 +334,20 @@ function CapacityView({ supplierId, suppliers, stages, overrides, ready, onEdit,
   if (!ready) return <section className="panel"><div className="panel-title"><div><h2>Supplier capacity</h2></div></div><div className="empty"><strong>Capacity migration required</strong><span>Run 20260928020000_add_supplier_production_capacity.sql in Supabase.</span></div></section>;
   return <section className="panel capacity-panel"><div className="panel-title capacity-heading"><div><h2>{selectedSupplier?.name} capacity</h2><p>Monthly capacity is configured explicitly; blank means Capacity Not Set.</p></div><div className="capacity-setting"><label>Year<select value={year} onChange={event => setYear(Number(event.target.value))}>{Array.from({length:5},(_,i)=>now.getUTCFullYear()-1+i).map(value=><option key={value}>{value}</option>)}</select></label><label>Set unconfigured months<input min="0" type="number" value={bulkCapacity} onChange={event => setBulkCapacity(event.target.value)} placeholder="Containers" /></label><button className="primary" disabled={saving} onClick={applyYear}>Apply</button></div></div><div className="capacity-grid">{months.map(month => { const key = capacityMonth(month); const rows = allocations(key); const allocated = planned[`${supplierId}:${key}`] || 0; const override = overrides.find(item => item.supplier_id === supplierId && item.capacity_month === key); const metrics = capacityMetrics(override?.container_capacity ?? null, allocated); const ratio = metrics.utilisation === null ? 0 : Math.min(metrics.utilisation, 100); return <article className={`capacity-card ${metrics.status.toLowerCase().replaceAll(" ", "-")}`} key={key}><button className="capacity-card-main" onClick={() => setSelectedMonth(selectedMonth === key ? null : key)}><span>{new Intl.DateTimeFormat("en-GB", { month: "long", year: "numeric", timeZone: "UTC" }).format(month)}</span><strong>{override ? override.container_capacity : "—"} <small>capacity</small> · {allocated} <small>planned</small></strong><i style={{ width: `${ratio}%` }} /><b>{metrics.remaining === null ? "Capacity not configured" : metrics.remaining >= 0 ? `Remaining: ${metrics.remaining}` : `Over capacity: ${Math.abs(metrics.remaining)}`}</b><em>{metrics.utilisation === null ? "—" : Number.isFinite(metrics.utilisation) ? `${metrics.utilisation.toFixed(2)}% · ` : "∞ · "}{metrics.status}</em></button><label className="override-field">Monthly capacity<input type="number" min="0" key={`${key}-${override?.container_capacity ?? "unset"}`} defaultValue={override?.container_capacity ?? ""} placeholder="Not set" onBlur={event => event.target.value !== String(override?.container_capacity ?? "") && void saveCapacity(key, event.target.value)} /></label>{selectedMonth === key && <div className="capacity-detail"><strong>Production stages using this month</strong>{rows.length ? rows.map(stage => <button className="capacity-stage-link" key={stage.id} onClick={() => onEdit(stage)}><span>{stage.procurement_jobs.sales_order_number || stage.procurement_jobs.client_name} · {stage.stage_reference}<small>ETD {formatDate(stage.planned_etd)}</small></span><b>{stage.container_quantity}</b></button>) : <span>No stages dispatching this month.</span>}<span className="capacity-total">Total<b>{allocated}</b></span></div>}</article>; })}</div></section>;
 }
+function timingClass(status: string) {
+  return status.startsWith("Late") ? "late" : status === "Supplier date needed" ? "pending" : "";
+}
+
 function SchedulePreview({ form }: { form: StageForm }) {
-  const schedule = calculateProductionSchedule({ productionStart: form.production_start, productionWeeks: Number(form.production_duration_weeks), dispatchWeeks: Number(form.dispatch_duration_weeks), transitWeeks: Number(form.transit_duration_weeks), destinationWeeks: Number(form.destination_duration_weeks), requiredSiteDate: form.required_site_date });
+  const schedule = scheduleFor(form);
+  if (form.planning_mode === "backward") {
+    const deadlines = backwardDeadlines({ requiredSiteDate: form.required_site_date, supplierReadyDate: form.supplier_ready_date || null, productionWeeks: Number(form.production_duration_weeks), dispatchWeeks: Number(form.dispatch_duration_weeks), transitWeeks: Number(form.transit_duration_weeks), destinationWeeks: Number(form.destination_duration_weeks) });
+    return <div className="backward-preview full">
+      <p>Latest dates to be on site {formatDate(form.required_site_date)}</p>
+      <div className="schedule-preview"><span><small>Start production by</small>{formatDate(deadlines.start_by)}</span><span><small>Goods ready by</small>{formatDate(deadlines.ready_by)}</span><span><small>Sail (ETD) by</small>{formatDate(deadlines.sail_by)}</span><span><small>Port arrival by</small>{formatDate(deadlines.port_eta_by)}</span><span><small>Timing</small><b className={`timing ${timingClass(schedule.timing_status)}`}>{schedule.timing_status}</b></span></div>
+      {form.supplier_ready_date && <><p>Forecast from supplier ready date {formatDate(form.supplier_ready_date)}</p>
+      <div className="schedule-preview"><span><small>Goods ready</small>{formatDate(schedule.goods_ready_date)}</span><span><small>Planned ETD</small>{formatDate(schedule.planned_etd)}</span><span><small>Port ETA</small>{formatDate(schedule.port_eta)}</span><span><small>Forecast on site</small>{formatDate(schedule.forecast_site_eta)}</span><span><small>Required on site</small>{formatDate(form.required_site_date)}</span></div></>}
+    </div>;
+  }
   return <div className="schedule-preview full"><span><small>Production finish</small>{formatDate(schedule.production_finish)}</span><span><small>Planned ETD</small>{formatDate(schedule.planned_etd)}</span><span><small>Port ETA</small>{formatDate(schedule.port_eta)}</span><span><small>Forecast site ETA</small>{formatDate(schedule.forecast_site_eta)}</span><span><small>Timing</small><b className={schedule.timing_status.startsWith("Late") ? "negative" : "remaining"}>{schedule.timing_status}</b></span></div>;
 }

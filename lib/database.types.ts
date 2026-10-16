@@ -64,6 +64,9 @@ export type ProcurementJob = {
 export const productionPriorities = ["Critical", "High", "Normal", "Low"] as const;
 export type ProductionPriority = (typeof productionPriorities)[number];
 
+// backward = project order planned back from the required on-site date; forward = stock order planned from production start.
+export type PlanningMode = "backward" | "forward";
+
 export type ProductionStage = {
   id: string;
   procurement_job_id: string;
@@ -85,6 +88,8 @@ export type ProductionStage = {
   forecast_site_eta: string;
   required_site_date: string;
   timing_status: string;
+  planning_mode: PlanningMode | null;
+  supplier_ready_date: string | null;
   allocation_override: boolean;
   created_at: string;
   updated_at: string;

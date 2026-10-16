@@ -36,6 +36,51 @@ export function calculateProductionSchedule(input: ProductionScheduleInput) {
   };
 }
 
+export type BackwardScheduleInput = {
+  requiredSiteDate: string;
+  supplierReadyDate: string | null;
+  productionWeeks: number;
+  dispatchWeeks: number;
+  transitWeeks: number;
+  destinationWeeks: number;
+};
+
+function daysBetween(from: string, to: string) {
+  return Math.round((new Date(`${to}T00:00:00Z`).getTime() - new Date(`${from}T00:00:00Z`).getTime()) / DAY_MS);
+}
+
+function days(count: number) {
+  return `${count} day${count === 1 ? "" : "s"}`;
+}
+
+// Latest dates each step must happen by for the containers to be on site on the required date.
+export function backwardDeadlines(input: BackwardScheduleInput) {
+  const portEtaBy = addWeeks(input.requiredSiteDate, -input.destinationWeeks);
+  const sailBy = addWeeks(portEtaBy, -input.transitWeeks);
+  const readyBy = addWeeks(sailBy, -input.dispatchWeeks);
+  const startBy = addWeeks(readyBy, -input.productionWeeks);
+  return { start_by: startBy, ready_by: readyBy, sail_by: sailBy, port_eta_by: portEtaBy };
+}
+
+// Project orders: plan back from the required on-site date. The supplier's committed
+// ready date (when known) drives the forecast; otherwise the plan assumes the deadline is met.
+export function calculateBackwardSchedule(input: BackwardScheduleInput) {
+  const deadlines = backwardDeadlines(input);
+  const ready = input.supplierReadyDate || deadlines.ready_by;
+  const plannedEtd = addWeeks(ready, input.dispatchWeeks);
+  const portEta = addWeeks(plannedEtd, input.transitWeeks);
+  const spare = daysBetween(ready, deadlines.ready_by);
+  return {
+    production_start: addWeeks(ready, -input.productionWeeks),
+    production_finish: ready,
+    goods_ready_date: ready,
+    planned_etd: plannedEtd,
+    port_eta: portEta,
+    forecast_site_eta: addWeeks(portEta, input.destinationWeeks),
+    timing_status: !input.supplierReadyDate ? "Supplier date needed" : spare < 0 ? `Late ${days(-spare)}` : spare === 0 ? "Within target" : `${days(spare)} spare`,
+  };
+}
+
 export function mondayOf(date: Date) {
   const result = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
   const day = result.getUTCDay();
