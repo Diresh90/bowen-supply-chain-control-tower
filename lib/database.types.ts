@@ -35,6 +35,9 @@ export const procurementStatuses = [
 
 export type ProcurementStatus = (typeof procurementStatuses)[number];
 
+export const orderTypes = ["Project", "Stock"] as const;
+export type OrderType = (typeof orderTypes)[number];
+
 // Kept in one place so this can be replaced by Project Manager master data later.
 export const projectManagers = [
   "Estee Evens",
@@ -56,6 +59,7 @@ export type ProcurementJob = {
   required_onsite_date: string | null;
   total_containers: number | null;
   status: ProcurementStatus | null;
+  order_type: OrderType | null;
   created_at: string;
   updated_at: string;
   suppliers: Pick<Supplier, "id" | "name" | "active"> | null;

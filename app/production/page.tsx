@@ -6,6 +6,7 @@ import { AppShell } from "@/components/app-shell";
 import { Notice } from "@/components/notice";
 import { PlanningMode, ProcurementJob, ProductionPriority, ProductionStage, productionPriorities, Supplier, SupplierCapacityOverride, SupplierProductionSetting } from "@/lib/database.types";
 import { backwardDeadlines, calculateBackwardSchedule, calculateProductionSchedule, capacityMetrics, capacityMonth, dateKey, mondayOf, plannedBySupplierMonth } from "@/lib/production";
+import { orderTypeOf, statusClass } from "@/lib/jobs";
 import { configurationError, supabaseRequest } from "@/lib/supabase";
 
 const WEEK_MS = 7 * 86_400_000;
@@ -35,8 +36,8 @@ function jobLabel(job: ProcurementJob) {
 }
 
 // Stock orders have no hard site deadline, so they are planned forward from production start.
-function isStockOrder(job: Pick<ProcurementJob, "client_name" | "sales_order_number"> | undefined) {
-  return !!job && /stock order/i.test(`${job.client_name} ${job.sales_order_number ?? ""}`);
+function isStockOrder(job: ProcurementJob | undefined) {
+  return !!job && orderTypeOf(job) === "Stock";
 }
 
 function scheduleFor(form: StageForm) {
@@ -212,7 +213,7 @@ export default function ProductionPage() {
 }
 
 function AvailableJobs({ jobs, allocatedByJob, loading, onCreate }: { jobs: ProcurementJob[]; allocatedByJob: Record<string, number>; loading: boolean; onCreate: (job: ProcurementJob) => void }) {
-  return <section className="panel"><div className="panel-title"><div><h2>Available for planning</h2><p>Confirmed and in-production orders can be allocated. Completed and dispatched orders remain visible as history.</p></div></div><div className="table-wrap"><table className="planning-table"><thead><tr><th>Job / Sales Order</th><th>Client</th><th>Supplier</th><th>Supplier PO</th><th>Destination</th><th>Required On-Site</th><th>Total</th><th>Allocated</th><th>Remaining</th><th>Status</th><th /></tr></thead><tbody>{loading ? <tr><td colSpan={11} className="empty">Loading production source data…</td></tr> : jobs.length === 0 ? <tr><td colSpan={11} className="empty"><strong>No eligible procurement jobs</strong><span>Jobs appear here after leaving Awaiting Confirmation.</span></td></tr> : jobs.map(job => { const allocated = allocatedByJob[job.id] || 0; const remaining = job.total_containers === null ? null : job.total_containers - allocated; const canPlan = plannableStatuses.has(job.status || "") && !!job.supplier_id && (remaining === null || remaining > 0); return <tr key={job.id}><td><strong>{job.sales_order_number || "—"}</strong></td><td>{job.client_name}</td><td>{job.suppliers?.name || "—"}</td><td>{job.supplier_po_number || "—"}</td><td>—</td><td>{formatDate(job.required_onsite_date)}</td><td>{job.total_containers ?? "—"}</td><td>{allocated}</td><td><strong className={remaining !== null && remaining < 0 ? "negative" : "remaining"}>{remaining ?? "—"}</strong></td><td><span className="badge status">{job.status}</span></td><td className="actions"><button disabled={!canPlan} title={!canPlan ? "This job is not open for new production planning" : ""} onClick={() => onCreate(job)}>＋ Create stage</button></td></tr>; })}</tbody></table></div></section>;
+  return <section className="panel"><div className="panel-title"><div><h2>Available for planning</h2><p>Confirmed and in-production orders can be allocated. Completed and dispatched orders remain visible as history.</p></div></div><div className="table-wrap"><table className="planning-table"><thead><tr><th>Job / Sales Order</th><th>Client</th><th>Supplier</th><th>Supplier PO</th><th>Destination</th><th>Required On-Site</th><th>Total</th><th>Allocated</th><th>Remaining</th><th>Status</th><th /></tr></thead><tbody>{loading ? <tr><td colSpan={11} className="empty">Loading production source data…</td></tr> : jobs.length === 0 ? <tr><td colSpan={11} className="empty"><strong>No eligible procurement jobs</strong><span>Jobs appear here after leaving Awaiting Confirmation.</span></td></tr> : jobs.map(job => { const allocated = allocatedByJob[job.id] || 0; const remaining = job.total_containers === null ? null : job.total_containers - allocated; const canPlan = plannableStatuses.has(job.status || "") && !!job.supplier_id && (remaining === null || remaining > 0); return <tr key={job.id}><td><strong>{job.sales_order_number || "—"}</strong></td><td>{job.client_name}</td><td>{job.suppliers?.name || "—"}</td><td>{job.supplier_po_number || "—"}</td><td>—</td><td>{formatDate(job.required_onsite_date)}</td><td>{job.total_containers ?? "—"}</td><td>{allocated}</td><td><strong className={remaining !== null && remaining < 0 ? "negative" : "remaining"}>{remaining ?? "—"}</strong></td><td><span className={statusClass(job.status)}>{job.status}</span></td><td className="actions"><button disabled={!canPlan} title={!canPlan ? "This job is not open for new production planning" : ""} onClick={() => onCreate(job)}>＋ Create stage</button></td></tr>; })}</tbody></table></div></section>;
 }
 
 function FreightAllocation({ stages, allocated }: { stages: ProductionStage[]; allocated: Record<string, number> }) {
