@@ -1,7 +1,11 @@
 // Dashboard calculations. Everything here is derived from the live records,
 // so the dashboard flags problems even when a manually set status is out of date.
-import type { FreightBooking, ProcurementJob, ProductionStage, Supplier, SupplierCapacityOverride } from "@/lib/database.types";
-import { capacityMetrics, capacityMonth, plannedBySupplierMonth, type CapacityStatus } from "@/lib/production";
+import type { FreightBooking, OrderType, ProcurementJob, ProductionStage, Supplier, SupplierCapacityOverride } from "@/lib/database.types";
+import { orderTypeOf } from "@/lib/jobs";
+import { addWeeks, capacityMetrics, capacityMonth, plannedBySupplierMonth, type CapacityStatus } from "@/lib/production";
+
+// Standard lead times (weeks) used to estimate delivery for a new order.
+export const STANDARD_WEEKS = { production: 5, dispatch: 2, transit: 6, delivery: 1 };
 
 export const SHIPPED_STATUSES = ["Dispatched", "In Transit", "Completed"];
 export const FREIGHT_DUE_DAYS = 21;
@@ -23,6 +27,8 @@ export type AttentionItem = {
 
 export type JobSummary = {
   job: ProcurementJob;
+  orderType: OrderType;
+  forecastOnSite: string | null;
   stages: ProductionStage[];
   ordered: number;
   planned: number;
@@ -36,7 +42,7 @@ export type JobSummary = {
 
 export type CapacityRow = {
   supplier: Pick<Supplier, "id" | "name">;
-  months: { month: string; label: string; capacity: number | null; planned: number; status: CapacityStatus }[];
+  months: { month: string; label: string; capacity: number | null; planned: number; free: number | null; status: CapacityStatus }[];
 };
 
 export function lateDays(timingStatus: string | null | undefined) {
@@ -81,17 +87,18 @@ export function summariseJobs(jobs: ProcurementJob[], stages: ProductionStage[],
     const shipped = jobBookings.filter(booking => SHIPPED_STATUSES.includes(booking.status)).reduce((sum, booking) => sum + booking.container_quantity, 0);
     const toBook = jobStages.reduce((sum, stage) => sum + Math.max(0, stage.container_quantity - (booked[stage.id] || 0)), 0);
     const worstLateDays = Math.max(0, ...jobStages.map(stage => lateDays(stage.timing_status)));
+    const forecastOnSite = jobStages.reduce<string | null>((latest, stage) => !latest || stage.forecast_site_eta > latest ? stage.forecast_site_eta : latest, null);
     return {
-      job, stages: jobStages, ordered, planned, booked: bookedTotal, shipped,
+      job, orderType: orderTypeOf(job), forecastOnSite, stages: jobStages, ordered, planned, booked: bookedTotal, shipped,
       toPlan: Math.max(0, ordered - planned), toBook, worstLateDays,
       timing: jobStages.length === 0 ? "Not planned" : worstLateDays > 0 ? "Late" : "Within target",
     };
   });
 }
 
-export function capacityRows(suppliers: Supplier[], overrides: SupplierCapacityOverride[], stages: ProductionStage[], now = new Date()): CapacityRow[] {
+export function capacityRows(suppliers: Supplier[], overrides: SupplierCapacityOverride[], stages: ProductionStage[], monthsAhead = 3, now = new Date()): CapacityRow[] {
   const planned = plannedBySupplierMonth(stages);
-  const months = Array.from({ length: 3 }, (_, offset) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + offset, 1)));
+  const months = Array.from({ length: monthsAhead }, (_, offset) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + offset, 1)));
   return suppliers
     .map(supplier => ({
       supplier,
@@ -99,7 +106,7 @@ export function capacityRows(suppliers: Supplier[], overrides: SupplierCapacityO
         const month = capacityMonth(date);
         const capacity = overrides.find(row => row.supplier_id === supplier.id && row.capacity_month === month)?.container_capacity ?? null;
         const metrics = capacityMetrics(capacity, planned[`${supplier.id}:${month}`] || 0);
-        return { month, label: new Intl.DateTimeFormat("en-GB", { month: "short", year: "numeric", timeZone: "UTC" }).format(date), capacity, planned: metrics.planned, status: metrics.status };
+        return { month, label: new Intl.DateTimeFormat("en-GB", { month: "short", year: "numeric", timeZone: "UTC" }).format(date), capacity, planned: metrics.planned, free: metrics.remaining, status: metrics.status };
       }),
     }))
     // Only show suppliers that have capacity set or work planned in the window.
@@ -218,4 +225,17 @@ export function attentionItems(summaries: JobSummary[], bookings: FreightBooking
 
   const rank: Record<Severity, number> = { high: 0, medium: 1, low: 2 };
   return items.sort((a, b) => rank[a.severity] - rank[b.severity]);
+}
+
+export type NewOrderEstimate = { etd: string; onSite: string; month: string; free: number } | { etd: null; reason: string };
+
+// Earliest delivery for a new order confirmed today: standard production and dispatch time,
+// then the first ETD month with enough free supplier capacity, then sea transit and delivery.
+export function estimateNewOrder(row: CapacityRow | undefined, containers: number, today: string): NewOrderEstimate {
+  if (!row) return { etd: null, reason: "No supplier capacity has been set." };
+  const earliestEtd = addWeeks(today, STANDARD_WEEKS.production + STANDARD_WEEKS.dispatch);
+  const month = row.months.find(m => m.month >= capacityMonth(earliestEtd) && m.free !== null && m.free >= containers);
+  if (!month) return { etd: null, reason: `No month in the next ${row.months.length} has ${containers} containers free.` };
+  const etd = month.month > earliestEtd ? month.month : earliestEtd;
+  return { etd, onSite: addWeeks(etd, STANDARD_WEEKS.transit + STANDARD_WEEKS.delivery), month: month.label, free: month.free ?? 0 };
 }
