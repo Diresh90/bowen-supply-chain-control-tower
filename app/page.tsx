@@ -5,7 +5,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { Notice } from "@/components/notice";
 import { FreightBooking, OrderType, ProcurementJob, ProductionStage, Supplier, SupplierCapacityOverride, procurementStatuses } from "@/lib/database.types";
-import { AttentionItem, Severity, STANDARD_WEEKS, attentionItems, capacityRows, daysBetween, estimateNewOrder, formatDate, jobLabel, summariseJobs } from "@/lib/dashboard";
+import { AttentionItem, Severity, STANDARD_WEEKS, attentionItems, capacityRows, daysBetween, estimateNewOrder, formatDate, jobLabel, pendingEtd, summariseJobs } from "@/lib/dashboard";
+import { capacityMonth, dateKey, mondayOf } from "@/lib/production";
 import { statusClass, statusColours } from "@/lib/jobs";
 import { configurationError, supabaseRequest } from "@/lib/supabase";
 
@@ -77,6 +78,11 @@ export default function Home() {
   const freeSoon = capacityRow?.months.slice(1, 4) ?? [];
   const quoteQty = Math.max(1, Math.round(Number(quoteContainers) || 1));
   const estimate = estimateNewOrder(capacityRow, quoteQty, today);
+  // Orders awaiting confirmation are not in the capacity yet, but may compete for the same month.
+  const pendingInFitMonth = estimate.etd === null ? 0 : jobs
+    .filter(job => job.status === "Awaiting Confirmation" && (!capacityRow || job.supplier_id === capacityRow.supplier.id))
+    .filter(job => capacityMonth(pendingEtd(job, today)) === capacityMonth(estimate.etd!))
+    .reduce((n, job) => n + (job.total_containers ?? 0), 0);
 
   // Orders table
   const managers = [...new Set(jobs.map(job => job.project_manager).filter((m): m is string => !!m))].sort();
@@ -108,8 +114,23 @@ export default function Home() {
       <article className="db-kpi purple"><span>Free capacity · next 3 months</span><strong>{show(freeSoon.reduce((n, m) => n + Math.max(0, m.free ?? 0), 0))}</strong><small>{show(freeSoon.length ? freeSoon.map(m => `${m.label.slice(0, 3)}: ${m.free === null ? "not set" : Math.max(0, m.free)}`).join(" · ") : "No capacity set")}</small></article>
     </section>
 
-    <section className="db-grid">
-      <article className="dash-panel db-capacity">
+    <section className="dash-panel db-fit">
+      <div className="db-fit-ask">
+        <span>Can we fit</span>
+        <input aria-label="Containers" type="number" min="1" step="1" value={quoteContainers} onChange={e => setQuoteContainers(e.target.value)} />
+        <span>containers{capacity.length > 1 ? " at" : "?"}</span>
+        {capacity.length > 1 && <><select aria-label="Supplier" value={capacityRow?.supplier.id} onChange={e => setCapacitySupplierId(e.target.value)}>{capacity.map(row => <option key={row.supplier.id} value={row.supplier.id}>{row.supplier.name}</option>)}</select><span>?</span></>}
+      </div>
+      {!ready ? <div className="db-fit-answer">Checking capacity…</div> : estimate.etd === null
+        ? <div className="db-fit-answer no"><strong>Not in a single month</strong><span>{estimate.reason} Try fewer containers, or split the order across months.</span></div>
+        : <div className="db-fit-answer yes">
+          <strong>Yes · ships {estimate.month} (W/C {formatDate(dateKey(mondayOf(new Date(`${estimate.etd}T00:00:00Z`))))})</strong>
+          <span>Earliest on site <b>{formatDate(estimate.onSite)}</b> · {estimate.free - quoteQty} containers left in {estimate.month} after this order{pendingInFitMonth > 0 ? ` · ${pendingInFitMonth} more awaiting confirmation may also need ${estimate.month}` : ""}</span>
+        </div>}
+      <small className="db-fit-basis">Uses the capacity and planned stages from Production. Lead time {STANDARD_WEEKS.production} wks production + {STANDARD_WEEKS.dispatch} wks loading and origin transport, then {STANDARD_WEEKS.transit} wks sea + {STANDARD_WEEKS.delivery} wk delivery. Confirm with production before quoting.</small>
+    </section>
+
+    <section className="dash-panel db-capacity db-capacity-full">
         <div className="db-panel-head"><div><h2>Capacity outlook</h2><p>Containers planned against monthly capacity, by ETD month.</p></div>
           {capacity.length > 1 && <select aria-label="Supplier" value={capacityRow?.supplier.id} onChange={e => setCapacitySupplierId(e.target.value)}>{capacity.map(row => <option key={row.supplier.id} value={row.supplier.id}>{row.supplier.name}</option>)}</select>}
         </div>
@@ -131,18 +152,6 @@ export default function Home() {
           <p className="db-legend"><span className="db-key planned" /> Planned <span className="db-key limit" /> Capacity · <span className="db-key near" /> 80%+ used <span className="db-key over" /> Full / over</p>
         </>}
         <Link className="db-panel-link" href="/production">Manage capacity →</Link>
-      </article>
-
-      <article className="dash-panel db-quote">
-        <h2>New order delivery estimate</h2>
-        <p className="db-panel-note">If a project order is confirmed today, when could it be on site?</p>
-        <label className="db-quote-input">Containers<input type="number" min="1" step="1" value={quoteContainers} onChange={e => setQuoteContainers(e.target.value)} /></label>
-        {!ready ? <div className="empty">Calculating…</div> : estimate.etd === null ? <p className="db-quote-none">{estimate.reason}</p> : <div className="db-quote-result">
-          <span>Earliest on site</span><strong>{formatDate(estimate.onSite)}</strong>
-          <small>Ships {formatDate(estimate.etd)} ({estimate.month}, {estimate.free} containers free{capacityRow ? ` at ${capacityRow.supplier.name}` : ""})</small>
-        </div>}
-        <p className="db-quote-basis">Based on {STANDARD_WEEKS.production} wks production, {STANDARD_WEEKS.dispatch} wks loading and origin transport, {STANDARD_WEEKS.transit} wks sea, {STANDARD_WEEKS.delivery} wk delivery. Confirm with production before quoting.</p>
-      </article>
     </section>
 
     <section className="dash-panel all-jobs">
