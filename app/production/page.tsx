@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type CSSP
 import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { Notice } from "@/components/notice";
+import { DispatchGrid } from "@/components/dispatch-grid";
 import { PlanningMode, ProcurementJob, ProductionPriority, ProductionStage, productionPriorities, Supplier, SupplierCapacityOverride, SupplierProductionSetting } from "@/lib/database.types";
 import { backwardDeadlines, calculateBackwardSchedule, calculateProductionSchedule, capacityMetrics, capacityMonth, dateKey, mondayOf, plannedBySupplierMonth } from "@/lib/production";
 import { orderTypeOf, statusClass } from "@/lib/jobs";
@@ -23,7 +24,7 @@ const emptyForm = {
   planning_mode: "backward" as PlanningMode, supplier_ready_date: "",
 };
 
-type Tab = "available" | "plan" | "capacity";
+type Tab = "dispatch" | "available" | "plan" | "capacity";
 type StageForm = typeof emptyForm;
 
 function formatDate(value: string | null) {
@@ -67,13 +68,14 @@ function addUtcMonths(date: Date, months: number) {
 export default function ProductionPage() {
   const [jobs, setJobs] = useState<ProcurementJob[]>([]);
   const [stages, setStages] = useState<ProductionStage[]>([]);
+  const [pendingJobs, setPendingJobs] = useState<ProcurementJob[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [capacitySettings, setCapacitySettings] = useState<SupplierProductionSetting[]>([]);
   const [capacityOverrides, setCapacityOverrides] = useState<SupplierCapacityOverride[]>([]);
   const [capacityReady, setCapacityReady] = useState(true);
   const [freightAllocated, setFreightAllocated] = useState<Record<string, number>>({});
   const [supplierId, setSupplierId] = useState("all");
-  const [tab, setTab] = useState<Tab>("available");
+  const [tab, setTab] = useState<Tab>("dispatch");
   const [form, setForm] = useState<StageForm>(emptyForm);
   const [editing, setEditing] = useState<ProductionStage | null>(null);
   const [open, setOpen] = useState(false);
@@ -95,6 +97,9 @@ export default function ProductionPage() {
         const freightRows = await supabaseRequest<{ production_stage_id: string; container_quantity: number }[]>("freight_bookings?select=production_stage_id,container_quantity&archived_at=is.null");
         setFreightAllocated(freightRows.reduce<Record<string, number>>((totals, booking) => { totals[booking.production_stage_id] = (totals[booking.production_stage_id] || 0) + booking.container_quantity; return totals; }, {}));
       } catch { setFreightAllocated({}); }
+      try {
+        setPendingJobs(await supabaseRequest<ProcurementJob[]>("procurement_jobs?select=*,suppliers(id,name,active)&status=eq.Awaiting%20Confirmation"));
+      } catch { setPendingJobs([]); }
       try {
         const [settings, overrides] = await Promise.all([
           supabaseRequest<SupplierProductionSetting[]>("supplier_production_settings?select=*"),
@@ -154,7 +159,7 @@ export default function ProductionPage() {
     try {
       if (editing) await supabaseRequest(`production_stages?id=eq.${editing.id}`, { method: "PATCH", body: payload });
       else await supabaseRequest("production_stages", { method: "POST", body: payload });
-      setOpen(false); await load(); setTab("plan"); setMessage({ text: `Production stage ${editing ? "updated" : "created"} in Supabase.`, kind: "success" });
+      setOpen(false); await load(); if (tab === "available") setTab("dispatch"); setMessage({ text: `Production stage ${editing ? "updated" : "created"} in Supabase.`, kind: "success" });
     } catch (error) { setMessage({ text: (error as Error).message, kind: "error" }); }
     finally { setSaving(false); }
   }
@@ -182,8 +187,9 @@ export default function ProductionPage() {
     <header className="page-header production-header"><div><p className="eyebrow">SUPPLIER PLANNING</p><h1>Production</h1><p>Allocate procurement containers and manage the end-to-end supplier production plan.</p></div><div className="supplier-filter"><label htmlFor="supplier-filter">Supplier</label><select id="supplier-filter" value={supplierId} onChange={e => setSupplierId(e.target.value)}><option value="all">All approved suppliers</option>{productionSuppliers.map(supplier => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}</select></div></header>
     {message && <Notice message={message.text} kind={message.kind} />}{configurationError() && !message && <Notice message={configurationError()!} />}
     <section className="metric-row production-metrics"><div className="metric"><span>Eligible jobs</span><strong>{filteredJobs.length}</strong></div><div className="metric"><span>Production stages</span><strong>{filteredStages.length}</strong></div><div className="metric"><span>Containers allocated</span><strong>{filteredStages.reduce((sum, stage) => sum + stage.container_quantity, 0)}</strong></div></section>
-    <div className="module-tabs" role="tablist"><button className={tab === "available" ? "selected" : ""} onClick={() => setTab("available")}>Available for Planning</button><button className={tab === "plan" ? "selected" : ""} onClick={() => setTab("plan")}>Production Plan</button><button className={tab === "capacity" ? "selected" : ""} onClick={() => setTab("capacity")}>Capacity</button></div>
+    <div className="module-tabs" role="tablist"><button className={tab === "dispatch" ? "selected" : ""} onClick={() => setTab("dispatch")}>Dispatch Weeks</button><button className={tab === "available" ? "selected" : ""} onClick={() => setTab("available")}>Available for Planning</button><button className={tab === "plan" ? "selected" : ""} onClick={() => setTab("plan")}>Production Plan</button><button className={tab === "capacity" ? "selected" : ""} onClick={() => setTab("capacity")}>Capacity</button></div>
 
+    {tab === "dispatch" && <DispatchGrid stages={filteredStages} pendingJobs={pendingJobs} overrides={capacityOverrides} supplierId={supplierId} loading={loading} onEdit={startEdit} />}
     {tab === "available" && <AvailableJobs jobs={filteredJobs} allocatedByJob={allocatedByJob} loading={loading} onCreate={startAdd} />}
     {tab === "plan" && <><ProductionPlan stages={filteredStages} loading={loading} onEdit={startEdit} onDelete={remove} /><FreightAllocation stages={filteredStages} allocated={freightAllocated} /></>}
     {tab === "capacity" && <CapacityView supplierId={supplierId} suppliers={productionSuppliers} stages={stages} settings={capacitySettings} overrides={capacityOverrides} ready={capacityReady} onEdit={startEdit} onRefresh={load} onMessage={setMessage} />}

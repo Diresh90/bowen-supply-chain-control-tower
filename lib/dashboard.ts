@@ -235,7 +235,23 @@ export function estimateNewOrder(row: CapacityRow | undefined, containers: numbe
   if (!row) return { etd: null, reason: "No supplier capacity has been set." };
   const earliestEtd = addWeeks(today, STANDARD_WEEKS.production + STANDARD_WEEKS.dispatch);
   const month = row.months.find(m => m.month >= capacityMonth(earliestEtd) && m.free !== null && m.free >= containers);
-  if (!month) return { etd: null, reason: `No month in the next ${row.months.length} has ${containers} containers free.` };
+  if (!month) {
+    const lastSet = [...row.months].reverse().find(m => m.capacity !== null);
+    const unset = row.months.some(m => m.month >= capacityMonth(earliestEtd) && m.capacity === null);
+    return { etd: null, reason: unset && lastSet
+      ? `No month up to ${lastSet.label} has ${containers} containers free, and capacity isn't set after ${lastSet.label} (Production → Capacity).`
+      : `No month in the next ${row.months.length} has ${containers} containers free.` };
+  }
   const etd = month.month > earliestEtd ? month.month : earliestEtd;
   return { etd, onSite: addWeeks(etd, STANDARD_WEEKS.transit + STANDARD_WEEKS.delivery), month: month.label, free: month.free ?? 0 };
+}
+
+// Estimated dispatch (ETD) date for an order still awaiting confirmation, so it can be shown
+// as a tentative booking: project orders work back from the required on-site date, stock orders
+// (or orders without a date) use the earliest possible dispatch.
+export function pendingEtd(job: ProcurementJob, today: string) {
+  const earliest = addWeeks(today, STANDARD_WEEKS.production + STANDARD_WEEKS.dispatch);
+  if (orderTypeOf(job) !== "Project" || !job.required_onsite_date) return earliest;
+  const fromSite = addWeeks(job.required_onsite_date, -(STANDARD_WEEKS.transit + STANDARD_WEEKS.delivery));
+  return fromSite > earliest ? fromSite : earliest;
 }
