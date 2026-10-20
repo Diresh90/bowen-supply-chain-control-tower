@@ -79,7 +79,8 @@ function bookedByStage(bookings: FreightBooking[]) {
 export function summariseJobs(jobs: ProcurementJob[], stages: ProductionStage[], bookings: FreightBooking[]): JobSummary[] {
   const booked = bookedByStage(bookings);
   return jobs.map(job => {
-    const jobStages = stages.filter(stage => stage.procurement_job_id === job.id);
+    // Tentative stages are not part of the confirmed plan yet.
+    const jobStages = stages.filter(stage => stage.procurement_job_id === job.id && !stage.tentative);
     const jobBookings = bookings.filter(booking => booking.procurement_job_id === job.id);
     const ordered = job.total_containers ?? 0;
     const planned = jobStages.reduce((sum, stage) => sum + stage.container_quantity, 0);
@@ -227,23 +228,24 @@ export function attentionItems(summaries: JobSummary[], bookings: FreightBooking
   return items.sort((a, b) => rank[a.severity] - rank[b.severity]);
 }
 
-export type NewOrderEstimate = { etd: string; onSite: string; month: string; free: number } | { etd: null; reason: string };
+export type NewOrderEstimate = { dispatch: string; etd: string; onSite: string; month: string; free: number } | { etd: null; reason: string };
 
-// Earliest delivery for a new order confirmed today: standard production and dispatch time,
-// then the first ETD month with enough free supplier capacity, then sea transit and delivery.
+// Earliest delivery for a new order confirmed today: standard production time to the first dispatch
+// month with enough free supplier capacity, then loading / origin transport, sea transit and delivery.
 export function estimateNewOrder(row: CapacityRow | undefined, containers: number, today: string): NewOrderEstimate {
   if (!row) return { etd: null, reason: "No supplier capacity has been set." };
-  const earliestEtd = addWeeks(today, STANDARD_WEEKS.production + STANDARD_WEEKS.dispatch);
-  const month = row.months.find(m => m.month >= capacityMonth(earliestEtd) && m.free !== null && m.free >= containers);
+  const earliestDispatch = addWeeks(today, STANDARD_WEEKS.production);
+  const month = row.months.find(m => m.month >= capacityMonth(earliestDispatch) && m.free !== null && m.free >= containers);
   if (!month) {
     const lastSet = [...row.months].reverse().find(m => m.capacity !== null);
-    const unset = row.months.some(m => m.month >= capacityMonth(earliestEtd) && m.capacity === null);
+    const unset = row.months.some(m => m.month >= capacityMonth(earliestDispatch) && m.capacity === null);
     return { etd: null, reason: unset && lastSet
       ? `No month up to ${lastSet.label} has ${containers} containers free, and capacity isn't set after ${lastSet.label} (Production → Capacity).`
       : `No month in the next ${row.months.length} has ${containers} containers free.` };
   }
-  const etd = month.month > earliestEtd ? month.month : earliestEtd;
-  return { etd, onSite: addWeeks(etd, STANDARD_WEEKS.transit + STANDARD_WEEKS.delivery), month: month.label, free: month.free ?? 0 };
+  const dispatch = month.month > earliestDispatch ? month.month : earliestDispatch;
+  const etd = addWeeks(dispatch, STANDARD_WEEKS.dispatch);
+  return { dispatch, etd, onSite: addWeeks(etd, STANDARD_WEEKS.transit + STANDARD_WEEKS.delivery), month: month.label, free: month.free ?? 0 };
 }
 
 // Estimated dispatch (ETD) date for an order still awaiting confirmation, so it can be shown
@@ -254,4 +256,9 @@ export function pendingEtd(job: ProcurementJob, today: string) {
   if (orderTypeOf(job) !== "Project" || !job.required_onsite_date) return earliest;
   const fromSite = addWeeks(job.required_onsite_date, -(STANDARD_WEEKS.transit + STANDARD_WEEKS.delivery));
   return fromSite > earliest ? fromSite : earliest;
+}
+
+// Estimated dispatch date (goods leaving the supplier) for an order awaiting confirmation.
+export function pendingDispatch(job: ProcurementJob, today: string) {
+  return addWeeks(pendingEtd(job, today), -STANDARD_WEEKS.dispatch);
 }

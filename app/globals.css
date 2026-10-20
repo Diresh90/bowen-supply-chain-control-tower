@@ -213,3 +213,5 @@ nav { padding:47px 9px 0; display:grid; gap:3px; } nav a,.settings-link { positi
 .db-capacity-full{margin-bottom:14px}
 .db-capacity-full .db-cap-chart{max-width:900px}
 @media(max-width:900px){.db-fit{grid-template-columns:1fr}}
+.dispatch-chip.pending.tentative{cursor:pointer;color:#c8d3dc;border-color:#7f93a2}
+.dispatch-chip.pending.tentative:hover{border-color:#52baff}

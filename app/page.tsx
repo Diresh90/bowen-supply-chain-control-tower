@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { Notice } from "@/components/notice";
 import { FreightBooking, OrderType, ProcurementJob, ProductionStage, Supplier, SupplierCapacityOverride, procurementStatuses } from "@/lib/database.types";
-import { AttentionItem, Severity, STANDARD_WEEKS, attentionItems, capacityRows, daysBetween, estimateNewOrder, formatDate, jobLabel, pendingEtd, summariseJobs } from "@/lib/dashboard";
+import { AttentionItem, Severity, STANDARD_WEEKS, attentionItems, capacityRows, daysBetween, estimateNewOrder, formatDate, jobLabel, pendingDispatch, summariseJobs } from "@/lib/dashboard";
 import { capacityMonth, dateKey, mondayOf } from "@/lib/production";
 import { statusClass, statusColours } from "@/lib/jobs";
 import { configurationError, supabaseRequest } from "@/lib/supabase";
@@ -67,7 +67,7 @@ export default function Home() {
   const openOrders = summaries.filter(s => s.job.status !== "Fully Dispatched");
   const lateOrders = summaries.filter(s => s.timing === "Late" && s.shipped < s.ordered);
   const arrivingLimit = new Date(Date.parse(`${today}T00:00:00Z`) + ARRIVING_DAYS * 86_400_000).toISOString().slice(0, 10);
-  const arriving = stages.filter(stage => stage.forecast_site_eta >= today && stage.forecast_site_eta <= arrivingLimit);
+  const arriving = stages.filter(stage => !stage.tentative && stage.forecast_site_eta >= today && stage.forecast_site_eta <= arrivingLimit);
   const arrivingOrders = new Set(arriving.map(stage => stage.procurement_job_id)).size;
 
   // Capacity chart and new-order estimate
@@ -78,11 +78,12 @@ export default function Home() {
   const freeSoon = capacityRow?.months.slice(1, 4) ?? [];
   const quoteQty = Math.max(1, Math.round(Number(quoteContainers) || 1));
   const estimate = estimateNewOrder(capacityRow, quoteQty, today);
-  // Orders awaiting confirmation are not in the capacity yet, but may compete for the same month.
-  const pendingInFitMonth = estimate.etd === null ? 0 : jobs
-    .filter(job => job.status === "Awaiting Confirmation" && (!capacityRow || job.supplier_id === capacityRow.supplier.id))
-    .filter(job => capacityMonth(pendingEtd(job, today)) === capacityMonth(estimate.etd!))
-    .reduce((n, job) => n + (job.total_containers ?? 0), 0);
+  // Tentative stages and orders awaiting confirmation are not counted in capacity yet, but may compete for the same month.
+  const fitMonth = estimate.etd === null ? null : capacityMonth(estimate.dispatch);
+  const jobsWithStages = new Set(stages.map(stage => stage.procurement_job_id));
+  const pendingInFitMonth = fitMonth === null ? 0
+    : stages.filter(stage => stage.tentative && (!capacityRow || stage.supplier_id === capacityRow.supplier.id) && capacityMonth(stage.goods_ready_date) === fitMonth).reduce((n, stage) => n + stage.container_quantity, 0)
+    + jobs.filter(job => job.status === "Awaiting Confirmation" && !jobsWithStages.has(job.id) && (!capacityRow || job.supplier_id === capacityRow.supplier.id) && capacityMonth(pendingDispatch(job, today)) === fitMonth).reduce((n, job) => n + (job.total_containers ?? 0), 0);
 
   // Orders table
   const managers = [...new Set(jobs.map(job => job.project_manager).filter((m): m is string => !!m))].sort();
@@ -124,14 +125,14 @@ export default function Home() {
       {!ready ? <div className="db-fit-answer">Checking capacity…</div> : estimate.etd === null
         ? <div className="db-fit-answer no"><strong>Not in a single month</strong><span>{estimate.reason} Try fewer containers, or split the order across months.</span></div>
         : <div className="db-fit-answer yes">
-          <strong>Yes · ships {estimate.month} (W/C {formatDate(dateKey(mondayOf(new Date(`${estimate.etd}T00:00:00Z`))))})</strong>
-          <span>Earliest on site <b>{formatDate(estimate.onSite)}</b> · {estimate.free - quoteQty} containers left in {estimate.month} after this order{pendingInFitMonth > 0 ? ` · ${pendingInFitMonth} more awaiting confirmation may also need ${estimate.month}` : ""}</span>
+          <strong>Yes · dispatches {estimate.month} (W/C {formatDate(dateKey(mondayOf(new Date(`${estimate.dispatch}T00:00:00Z`))))}), sails about {formatDate(estimate.etd)}</strong>
+          <span>Earliest on site <b>{formatDate(estimate.onSite)}</b> · {estimate.free - quoteQty} containers left in {estimate.month} after this order{pendingInFitMonth > 0 ? ` · ${pendingInFitMonth} tentative / awaiting confirmation may also need ${estimate.month}` : ""}</span>
         </div>}
       <small className="db-fit-basis">Uses the capacity and planned stages from Production. Lead time {STANDARD_WEEKS.production} wks production + {STANDARD_WEEKS.dispatch} wks loading and origin transport, then {STANDARD_WEEKS.transit} wks sea + {STANDARD_WEEKS.delivery} wk delivery. Confirm with production before quoting.</small>
     </section>
 
     <section className="dash-panel db-capacity db-capacity-full">
-        <div className="db-panel-head"><div><h2>Capacity outlook</h2><p>Containers planned against monthly capacity, by ETD month.</p></div>
+        <div className="db-panel-head"><div><h2>Capacity outlook</h2><p>Containers planned against monthly capacity, by dispatch month. Tentative stages are not counted.</p></div>
           {capacity.length > 1 && <select aria-label="Supplier" value={capacityRow?.supplier.id} onChange={e => setCapacitySupplierId(e.target.value)}>{capacity.map(row => <option key={row.supplier.id} value={row.supplier.id}>{row.supplier.name}</option>)}</select>}
         </div>
         {!capacityAvailable ? <div className="capacity-unavailable">Capacity data unavailable</div> : !ready ? <div className="empty">Loading capacity…</div> : !capacityRow ? <div className="capacity-unavailable">No supplier capacity set yet</div> : <>

@@ -94,6 +94,8 @@ export type ProductionStage = {
   timing_status: string;
   planning_mode: PlanningMode | null;
   supplier_ready_date: string | null;
+  // Planned dispatch date not yet confirmed: shown on the dispatch plan, not counted against capacity.
+  tentative?: boolean;
   allocation_override: boolean;
   created_at: string;
   updated_at: string;
