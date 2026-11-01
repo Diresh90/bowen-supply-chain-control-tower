@@ -106,10 +106,9 @@ export function capacityMetrics(capacity: number | null, planned: number) {
   return { capacity, planned, remaining: capacity - planned, utilisation, status };
 }
 
-// Supplier capacity is counted by dispatch month: the date goods are ready and leave the supplier.
-// Tentative stages are not counted until they are confirmed.
-export function plannedBySupplierMonth<T extends { supplier_id: string; goods_ready_date: string; container_quantity: number; tentative?: boolean }>(stages: T[]) {
-  return stages.filter(stage => !stage.tentative).reduce<Record<string, number>>((totals, stage) => {
+// Supplier capacity is counted by planned dispatch month (goods leave the supplier). Every stage counts, tentative included.
+export function plannedBySupplierMonth<T extends { supplier_id: string; goods_ready_date: string; container_quantity: number }>(stages: T[]) {
+  return stages.reduce<Record<string, number>>((totals, stage) => {
     const key = `${stage.supplier_id}:${capacityMonth(stage.goods_ready_date)}`;
     totals[key] = (totals[key] || 0) + stage.container_quantity;
     return totals;
