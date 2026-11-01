@@ -6,7 +6,7 @@ import { AppShell } from "@/components/app-shell";
 import { Notice } from "@/components/notice";
 import { DispatchGrid } from "@/components/dispatch-grid";
 import { PlanningMode, ProcurementJob, ProductionPriority, ProductionStage, productionPriorities, Supplier, SupplierCapacityOverride, SupplierProductionSetting } from "@/lib/database.types";
-import { backwardDeadlines, calculateBackwardSchedule, calculateProductionSchedule, capacityMetrics, capacityMonth, dateKey, mondayOf, plannedBySupplierMonth } from "@/lib/production";
+import { addWeeks, backwardDeadlines, calculateBackwardSchedule, calculateProductionSchedule, capacityMetrics, capacityMonth, dateKey, mondayOf, plannedBySupplierMonth } from "@/lib/production";
 import { orderTypeOf, statusClass } from "@/lib/jobs";
 import { configurationError, supabaseRequest } from "@/lib/supabase";
 
@@ -18,10 +18,10 @@ const visibleStatuses = new Set(["Confirmed", "In Production", "Production Compl
 const plannableStatuses = new Set(["Confirmed", "In Production"]);
 const emptyForm = {
   procurement_job_id: "", stage_reference: "", container_quantity: "", priority: "Normal" as ProductionPriority,
-  queue_sequence: "1", destination: "", production_start: "", production_duration_weeks: "5",
+  queue_sequence: "1", destination: "", dispatch_date: "", production_duration_weeks: "5",
   dispatch_duration_weeks: "2", transit_duration_weeks: "6", destination_duration_weeks: "1",
   required_site_date: "", allocation_override: false,
-  planning_mode: "backward" as PlanningMode, supplier_ready_date: "", tentative: false,
+  planning_mode: "backward" as PlanningMode, tentative: false,
 };
 
 type Tab = "dispatch" | "available" | "plan" | "capacity";
@@ -43,12 +43,14 @@ function isStockOrder(job: ProcurementJob | undefined) {
 
 function scheduleFor(form: StageForm) {
   const weeks = { productionWeeks: Number(form.production_duration_weeks), dispatchWeeks: Number(form.dispatch_duration_weeks), transitWeeks: Number(form.transit_duration_weeks), destinationWeeks: Number(form.destination_duration_weeks) };
-  if (form.planning_mode === "backward") return calculateBackwardSchedule({ ...weeks, requiredSiteDate: form.required_site_date, supplierReadyDate: form.supplier_ready_date || null });
-  return { production_start: form.production_start, ...calculateProductionSchedule({ ...weeks, productionStart: form.production_start, requiredSiteDate: form.required_site_date }) };
+  // Every stage is entered by its planned dispatch date (goods leave the supplier).
+  if (form.planning_mode === "backward") return calculateBackwardSchedule({ ...weeks, requiredSiteDate: form.required_site_date, supplierReadyDate: form.dispatch_date || null });
+  const productionStart = addWeeks(form.dispatch_date, -weeks.productionWeeks);
+  return { production_start: productionStart, ...calculateProductionSchedule({ ...weeks, productionStart, requiredSiteDate: form.required_site_date }) };
 }
 
 function scheduleReady(form: StageForm) {
-  return !!form.required_site_date && (form.planning_mode === "backward" || !!form.production_start);
+  return !!form.required_site_date && (form.planning_mode === "backward" || !!form.dispatch_date);
 }
 
 function utcDate(value: string) {
@@ -128,17 +130,18 @@ export default function ProductionPage() {
     setOpen(true); setMessage(null);
   }
 
-  // Stages saved before planning modes existed default by order type. A project stage keeps its
-  // current ready date as the supplier date, so switching it to backward planning moves nothing.
+  // Stages saved before planning modes existed default by order type. The form opens with the stage's
+  // current dispatch date, so saving without changes moves nothing. A project stage still waiting on
+  // a dispatch date (its stored ready date is only the deadline) opens blank.
   function editModeFor(stage: ProductionStage) {
     const planning_mode: PlanningMode = stage.planning_mode ?? (isStockOrder(stage.procurement_jobs) ? "forward" : "backward");
-    const supplier_ready_date = stage.supplier_ready_date ?? (planning_mode === "backward" && !stage.planning_mode ? stage.goods_ready_date : "");
-    return { planning_mode, supplier_ready_date };
+    const dispatch_date = planning_mode === "backward" && stage.planning_mode ? stage.supplier_ready_date ?? "" : stage.goods_ready_date;
+    return { planning_mode, dispatch_date };
   }
 
   function startEdit(stage: ProductionStage) {
     setEditing(stage);
-    setForm({ procurement_job_id: stage.procurement_job_id, stage_reference: stage.stage_reference, container_quantity: String(stage.container_quantity), priority: stage.priority, queue_sequence: String(stage.queue_sequence), destination: stage.destination || "", production_start: stage.production_start, production_duration_weeks: String(stage.production_duration_weeks), dispatch_duration_weeks: String(stage.dispatch_duration_weeks), transit_duration_weeks: String(stage.transit_duration_weeks), destination_duration_weeks: String(stage.destination_duration_weeks), required_site_date: stage.required_site_date, allocation_override: stage.allocation_override, tentative: !!stage.tentative, ...editModeFor(stage) });
+    setForm({ procurement_job_id: stage.procurement_job_id, stage_reference: stage.stage_reference, container_quantity: String(stage.container_quantity), priority: stage.priority, queue_sequence: String(stage.queue_sequence), destination: stage.destination || "", production_duration_weeks: String(stage.production_duration_weeks), dispatch_duration_weeks: String(stage.dispatch_duration_weeks), transit_duration_weeks: String(stage.transit_duration_weeks), destination_duration_weeks: String(stage.destination_duration_weeks), required_site_date: stage.required_site_date, allocation_override: stage.allocation_override, tentative: !!stage.tentative, ...editModeFor(stage) });
     setOpen(true); setMessage(null);
   }
 
@@ -154,7 +157,7 @@ export default function ProductionPage() {
       return;
     }
     const schedule = scheduleFor(form);
-    const payload = { procurement_job_id: job.id, supplier_id: job.supplier_id, stage_reference: form.stage_reference.trim(), container_quantity: quantity, priority: form.priority, queue_sequence: Number(form.queue_sequence), destination: form.destination.trim() || null, production_duration_weeks: Number(form.production_duration_weeks), dispatch_duration_weeks: Number(form.dispatch_duration_weeks), transit_duration_weeks: Number(form.transit_duration_weeks), destination_duration_weeks: Number(form.destination_duration_weeks), required_site_date: form.required_site_date, allocation_override: form.allocation_override, planning_mode: form.planning_mode, supplier_ready_date: form.planning_mode === "backward" ? form.supplier_ready_date || null : null, tentative: form.tentative, ...schedule };
+    const payload = { procurement_job_id: job.id, supplier_id: job.supplier_id, stage_reference: form.stage_reference.trim(), container_quantity: quantity, priority: form.priority, queue_sequence: Number(form.queue_sequence), destination: form.destination.trim() || null, production_duration_weeks: Number(form.production_duration_weeks), dispatch_duration_weeks: Number(form.dispatch_duration_weeks), transit_duration_weeks: Number(form.transit_duration_weeks), destination_duration_weeks: Number(form.destination_duration_weeks), required_site_date: form.required_site_date, allocation_override: form.allocation_override, planning_mode: form.planning_mode, supplier_ready_date: form.planning_mode === "backward" ? form.dispatch_date || null : null, tentative: form.tentative, ...schedule };
     setSaving(true); setMessage(null);
     try {
       if (editing) await supabaseRequest(`production_stages?id=eq.${editing.id}`, { method: "PATCH", body: payload });
@@ -197,11 +200,9 @@ export default function ProductionPage() {
     {open && <div className="modal-backdrop" onMouseDown={() => !saving && setOpen(false)}><div className="modal production-modal" role="dialog" aria-modal="true" aria-labelledby="stage-title" onMouseDown={e => e.stopPropagation()}><div className="modal-head"><div><p className="eyebrow">PRODUCTION STAGE</p><h2 id="stage-title">{editing ? "Edit stage" : "Create stage"}</h2><p className="modal-context">{selectedJob ? `${jobLabel(selectedJob)} · ${selectedJob.client_name}` : "Linked procurement plan"}</p></div><button className="icon-button" aria-label="Close" onClick={() => setOpen(false)}>×</button></div><form onSubmit={save}><div className="form-grid stage-form">
       <label className="full">Procurement job<select required disabled={!!editing} value={form.procurement_job_id} onChange={e => { const job = jobs.find(item => item.id === e.target.value); setForm({ ...form, procurement_job_id: e.target.value, required_site_date: job?.required_onsite_date || "", planning_mode: isStockOrder(job) ? "forward" : "backward" }); }}><option value="">Select a job</option>{[...jobs.filter(job => plannableStatuses.has(job.status || "") && job.supplier_id), ...(form.tentative || editing ? pendingJobs.filter(job => job.supplier_id) : [])].map(job => <option key={job.id} value={job.id}>{jobLabel(job)} — {job.client_name}</option>)}</select></label>
       <label>Stage reference *<input required value={form.stage_reference} onChange={e => setForm({...form, stage_reference:e.target.value})} /></label><label>Container quantity *<input required type="number" min="1" value={form.container_quantity} onChange={e => setForm({...form, container_quantity:e.target.value})} /></label>
-      <div className="planning-mode full"><strong>{form.planning_mode === "backward" ? "Project order · planned back from the on-site date" : "Stock order · planned forward from production start"}</strong><span>{form.planning_mode === "backward" ? "Enter the supplier's committed ready date to see if the stage is on time." : "Enter when production starts to see when it lands."}</span></div>
+      <div className="planning-mode full"><strong>{form.planning_mode === "backward" ? "Project order · planned back from the on-site date" : "Stock order · planned forward from dispatch"}</strong><span>{form.planning_mode === "backward" ? "Enter the planned dispatch date to see if it lands on time." : "Enter the planned dispatch date; production start is worked out from it."}</span></div>
       <label>Required on-site date *<input required type="date" value={form.required_site_date} onChange={e => setForm({...form, required_site_date:e.target.value})} /></label>
-      {form.planning_mode === "backward"
-        ? <label>Supplier committed ready date<input type="date" value={form.supplier_ready_date} onChange={e => setForm({...form, supplier_ready_date:e.target.value})} /></label>
-        : <label>Production start *<input required type="date" value={form.production_start} onChange={e => setForm({...form, production_start:e.target.value})} /></label>}
+      <label>Planned dispatch date{form.planning_mode === "forward" ? " *" : ""}<input required={form.planning_mode === "forward"} type="date" value={form.dispatch_date} onChange={e => setForm({...form, dispatch_date:e.target.value})} /></label>
       <label className="check full"><input type="checkbox" checked={form.tentative} onChange={e => setForm({...form, tentative: e.target.checked})} /> Tentative: dispatch date not confirmed yet (shown on the dispatch plan, not counted against capacity). Orders awaiting confirmation can be planned tentatively.</label>
       <label className="full">Destination<input value={form.destination} onChange={e => setForm({...form, destination:e.target.value})} placeholder="Optional destination" /></label>
       {scheduleReady(form) && <SchedulePreview form={form} />}
@@ -349,13 +350,13 @@ function timingClass(status: string) {
 function SchedulePreview({ form }: { form: StageForm }) {
   const schedule = scheduleFor(form);
   if (form.planning_mode === "backward") {
-    const deadlines = backwardDeadlines({ requiredSiteDate: form.required_site_date, supplierReadyDate: form.supplier_ready_date || null, productionWeeks: Number(form.production_duration_weeks), dispatchWeeks: Number(form.dispatch_duration_weeks), transitWeeks: Number(form.transit_duration_weeks), destinationWeeks: Number(form.destination_duration_weeks) });
+    const deadlines = backwardDeadlines({ requiredSiteDate: form.required_site_date, supplierReadyDate: form.dispatch_date || null, productionWeeks: Number(form.production_duration_weeks), dispatchWeeks: Number(form.dispatch_duration_weeks), transitWeeks: Number(form.transit_duration_weeks), destinationWeeks: Number(form.destination_duration_weeks) });
     return <div className="backward-preview full">
       <p>Latest dates to be on site {formatDate(form.required_site_date)}</p>
-      <div className="schedule-preview"><span><small>Start production by</small>{formatDate(deadlines.start_by)}</span><span><small>Goods ready by</small>{formatDate(deadlines.ready_by)}</span><span><small>Sail (ETD) by</small>{formatDate(deadlines.sail_by)}</span><span><small>Port arrival by</small>{formatDate(deadlines.port_eta_by)}</span><span><small>Timing</small><b className={`timing ${timingClass(schedule.timing_status)}`}>{schedule.timing_status}</b></span></div>
-      {form.supplier_ready_date && <><p>Forecast from supplier ready date {formatDate(form.supplier_ready_date)}</p>
-      <div className="schedule-preview"><span><small>Goods ready</small>{formatDate(schedule.goods_ready_date)}</span><span><small>Planned ETD</small>{formatDate(schedule.planned_etd)}</span><span><small>Port ETA</small>{formatDate(schedule.port_eta)}</span><span><small>Forecast on site</small>{formatDate(schedule.forecast_site_eta)}</span><span><small>Required on site</small>{formatDate(form.required_site_date)}</span></div></>}
+      <div className="schedule-preview"><span><small>Start production by</small>{formatDate(deadlines.start_by)}</span><span><small>Dispatch by</small>{formatDate(deadlines.ready_by)}</span><span><small>Sail (ETD) by</small>{formatDate(deadlines.sail_by)}</span><span><small>Port arrival by</small>{formatDate(deadlines.port_eta_by)}</span><span><small>Timing</small><b className={`timing ${timingClass(schedule.timing_status)}`}>{schedule.timing_status}</b></span></div>
+      {form.dispatch_date && <><p>Forecast from planned dispatch {formatDate(form.dispatch_date)}</p>
+      <div className="schedule-preview"><span><small>Production start</small>{formatDate(schedule.production_start)}</span><span><small>Planned ETD</small>{formatDate(schedule.planned_etd)}</span><span><small>Port ETA</small>{formatDate(schedule.port_eta)}</span><span><small>Forecast on site</small>{formatDate(schedule.forecast_site_eta)}</span><span><small>Required on site</small>{formatDate(form.required_site_date)}</span></div></>}
     </div>;
   }
-  return <div className="schedule-preview full"><span><small>Production finish</small>{formatDate(schedule.production_finish)}</span><span><small>Planned ETD</small>{formatDate(schedule.planned_etd)}</span><span><small>Port ETA</small>{formatDate(schedule.port_eta)}</span><span><small>Forecast site ETA</small>{formatDate(schedule.forecast_site_eta)}</span><span><small>Timing</small><b className={schedule.timing_status.startsWith("Late") ? "negative" : "remaining"}>{schedule.timing_status}</b></span></div>;
+  return <div className="schedule-preview full"><span><small>Production start</small>{formatDate(schedule.production_start)}</span><span><small>Planned ETD</small>{formatDate(schedule.planned_etd)}</span><span><small>Port ETA</small>{formatDate(schedule.port_eta)}</span><span><small>Forecast site ETA</small>{formatDate(schedule.forecast_site_eta)}</span><span><small>Timing</small><b className={schedule.timing_status.startsWith("Late") ? "negative" : "remaining"}>{schedule.timing_status}</b></span></div>;
 }
