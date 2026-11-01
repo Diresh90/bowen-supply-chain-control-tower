@@ -19,6 +19,13 @@ npm run build      # production build
 npm run typecheck  # tsc --noEmit
 ```
 
+## Light / dark mode
+
+- Dark is the default; the ☀ / ☾ switch in the top bar sets `data-theme="light"` on `<html>` and remembers it in `localStorage`.
+- `app/theme-light.css` is **generated** from `app/globals.css` — after changing colours in `globals.css`, run `npm.cmd run theme:light`. Never edit it by hand.
+- Hand-tuned light-mode fixes go in `app/theme-light-overrides.css`.
+- The Bowen logo (`public/bowen-logo.svg`) must never be recoloured or edited; in light mode it sits on a soft grey panel so the cream segment stays visible.
+
 ## Workflow rules
 
 Every change follows these steps, in order:

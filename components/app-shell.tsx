@@ -4,6 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 const navigation = [
   ["/", "▣", "Dashboard"],
@@ -45,6 +46,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </aside>
       <main className="content">
         <div className="topbar">
+          <ThemeToggle />
           <span className="user-name">Diresh</span>
           <span className="avatar" aria-label="User profile">D</span>
         </div>
