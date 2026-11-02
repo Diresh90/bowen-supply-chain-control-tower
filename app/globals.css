@@ -266,3 +266,7 @@ nav { padding:47px 9px 0; display:grid; gap:3px; } nav a,.settings-link { positi
 .db-rate-chart .grid{stroke:#263642;stroke-width:1}
 .db-rate-key{display:inline-flex;align-items:center;gap:5px;margin-right:12px}
 .db-rate-key i{display:inline-block;width:12px;height:3px;border-radius:2px}
+
+/* Sidebar icons (Lucide line icons) */
+.nav-icon{display:inline-flex;align-items:center;justify-content:center;width:20px;line-height:0}
+.nav-icon svg{display:block}

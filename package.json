@@ -10,6 +10,7 @@
     "theme:light": "node scripts/generate-light-theme.mjs"
   },
   "dependencies": {
+    "lucide-react": "0.468.0",
     "next": "15.5.26",
     "react": "19.1.1",
     "react-dom": "19.1.1"
