@@ -71,6 +71,10 @@ export type ProductionPriority = (typeof productionPriorities)[number];
 // backward = project order planned back from the required on-site date; forward = stock order planned from production start.
 export type PlanningMode = "backward" | "forward";
 
+// Where a stage (one shipment) is up to. Dispatched = left the supplier; Arrived = on site.
+export const dispatchStatuses = ["Tentative", "Confirmed", "Dispatched", "Sailed", "Arrived"] as const;
+export type DispatchStatus = (typeof dispatchStatuses)[number];
+
 export type ProductionStage = {
   id: string;
   procurement_job_id: string;
@@ -96,6 +100,13 @@ export type ProductionStage = {
   supplier_ready_date: string | null;
   // Planned dispatch date not yet confirmed: shown on the dispatch plan, not counted against capacity.
   tentative?: boolean;
+  dispatch_status?: DispatchStatus | null;
+  // Freight per 40ft container: USD ocean freight and surcharges, AUD local charges.
+  ocean_freight_usd?: number | null;
+  peak_season_surcharge_usd?: number | null;
+  other_surcharges_usd?: number | null;
+  local_charges_aud?: number | null;
+  usd_aud_rate?: number | null;
   allocation_override: boolean;
   created_at: string;
   updated_at: string;

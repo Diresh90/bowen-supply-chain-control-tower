@@ -224,3 +224,45 @@ nav { padding:47px 9px 0; display:grid; gap:3px; } nav a,.settings-link { positi
 /* Production header: add stage + supplier filter; delete inside the stage form */
 .production-actions{display:flex;align-items:flex-end;gap:14px}
 .modal-actions .stage-delete{margin-right:auto;background:transparent;border:0;padding:8px 4px;font-size:12px;cursor:pointer}
+
+/* Dispatch status: stage form steps, grid chips, job status colour */
+.dispatch-status-field>span{display:block;font-size:12px;color:#aeb8c2;margin-bottom:6px}
+.dispatch-status-field small{display:block;font-size:10px;color:#7c8b96;margin-top:6px}
+.status-steps{display:flex;flex-wrap:wrap;gap:6px}
+.status-step{background:#0e1b25;border:1px solid #2c3b47;border-radius:16px;color:#aeb8c2;padding:6px 13px;font-size:12px;cursor:pointer}
+.status-step.selected{color:#f1f4f7;font-weight:700}
+.status-step.tentative.selected{border:1px dashed #9fb0bd;background:#1b2832}
+.status-step.confirmed.selected{border-color:#1d5f96;background:#0f3456;color:#8ccaff}
+.status-step.dispatched.selected{border-color:#54449a;background:#2b2250;color:#c2b2ff}
+.status-step.sailed.selected{border-color:#1a6b73;background:#0e3a40;color:#7fdde6}
+.status-step.arrived.selected{border-color:#16694e;background:#0e4b39;color:#6be5a1}
+.dispatch-chip.status-dispatched{background:#2b2250;border-color:#54449a;color:#c2b2ff}
+.dispatch-chip.status-sailed{background:#0e3a40;border-color:#1a6b73;color:#7fdde6}
+.dispatch-chip.status-arrived{background:#0e4b39;border-color:#16694e;color:#6be5a1}
+.dispatch-legend-item{display:inline-flex;align-items:center;gap:5px;margin-right:6px}
+.job-status.partially-dispatched{color:#c2b2ff;background:#2b2250;border-color:#54449a}
+
+/* Stage form: freight section */
+.freight-fields{border:1px solid #273744;border-radius:6px;padding:10px 12px 12px;margin:0}
+.freight-fields legend{padding:0 6px;font-size:12px;color:#8ccaff}
+.freight-totals{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:8px 22px;padding-top:8px;border-top:1px solid #273744;font-size:11px;color:#9fb0bd}
+.freight-totals b{color:#f1f4f7;margin-left:4px}
+
+/* Dashboard: freight spend and 40ft rate trend */
+.db-freight .dash-panel{position:relative;padding-bottom:8px}
+.db-freight-empty{padding:26px 17px;color:#82909b;font-size:12px}
+.db-freight-warning{margin:4px 17px 0;color:#ffc660;font-size:11px}
+.db-spend-chart{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;padding:6px 17px 4px;align-items:end}
+.db-spend-col{display:flex;flex-direction:column;align-items:center;gap:5px}
+.db-spend-value{font-size:11px;color:#f1f4f7;font-weight:600;min-height:14px}
+.db-spend-track{width:100%;max-width:46px;height:120px;background:#0e1b25;border-radius:5px;display:flex;flex-direction:column-reverse;overflow:hidden}
+.db-spend-track .confirmed{display:block;background:#7859dd}
+.db-spend-track .tentative{display:block;background:repeating-linear-gradient(45deg,#7859dd88 0 4px,transparent 4px 8px)}
+.db-cap-month.now{color:#f4c44e;font-weight:700}
+.db-legend .db-key.spend{background:#7859dd}.db-legend .db-key.spend-tentative{background:repeating-linear-gradient(45deg,#7859dd 0 2px,transparent 2px 4px)}
+.db-rate-chart{padding:0 12px}
+.db-rate-chart svg{width:100%;height:auto;display:block}
+.db-rate-chart text{fill:#8e9ca8;font-size:10px}
+.db-rate-chart .grid{stroke:#263642;stroke-width:1}
+.db-rate-key{display:inline-flex;align-items:center;gap:5px;margin-right:12px}
+.db-rate-key i{display:inline-block;width:12px;height:3px;border-radius:2px}

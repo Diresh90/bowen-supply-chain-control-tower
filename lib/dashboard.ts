@@ -1,14 +1,12 @@
-// Dashboard calculations. Everything here is derived from the live records,
-// so the dashboard flags problems even when a manually set status is out of date.
-import type { FreightBooking, OrderType, ProcurementJob, ProductionStage, Supplier, SupplierCapacityOverride } from "@/lib/database.types";
-import { orderTypeOf } from "@/lib/jobs";
+// Dashboard calculations. Everything here is derived from the live records: each job's status and
+// progress come from its stages' dispatch statuses, set on the Dispatch Plan.
+import type { OrderType, ProcurementJob, ProductionStage, Supplier, SupplierCapacityOverride } from "@/lib/database.types";
+import { type JobStatus, isDispatched, jobStatusOf, orderTypeOf, stageStatusOf } from "@/lib/jobs";
 import { addWeeks, capacityMetrics, capacityMonth, plannedBySupplierMonth, type CapacityStatus } from "@/lib/production";
 
 // Standard lead times (weeks) used to estimate delivery for a new order.
 export const STANDARD_WEEKS = { production: 5, dispatch: 2, transit: 6, delivery: 1 };
 
-export const SHIPPED_STATUSES = ["Dispatched", "In Transit", "Completed"];
-export const FREIGHT_DUE_DAYS = 21;
 export const AWAITING_CONFIRMATION_DAYS = 14;
 
 const DAY_MS = 86_400_000;
@@ -18,7 +16,7 @@ export type Severity = "high" | "medium" | "low";
 export type AttentionItem = {
   id: string;
   severity: Severity;
-  category: "Late" | "Freight to book" | "Freight off track" | "Status check" | "Waiting on supplier" | "Capacity" | "To plan";
+  category: "Late" | "Update dispatch" | "Waiting on supplier" | "Capacity" | "To plan";
   jobId: string | null;
   title: string;
   detail: string;
@@ -27,15 +25,18 @@ export type AttentionItem = {
 
 export type JobSummary = {
   job: ProcurementJob;
+  status: JobStatus;
   orderType: OrderType;
   forecastOnSite: string | null;
+  // Confirmed stages (not tentative).
   stages: ProductionStage[];
+  currentStage: string | null;
   ordered: number;
   planned: number;
-  booked: number;
-  shipped: number;
+  dispatched: number;
+  arrived: number;
+  tentative: number;
   toPlan: number;
-  toBook: number;
   worstLateDays: number;
   timing: "Not planned" | "Within target" | "Late";
 };
@@ -69,29 +70,25 @@ function plural(count: number, word: string) {
   return `${count} ${word}${count === 1 ? "" : "s"}`;
 }
 
-function bookedByStage(bookings: FreightBooking[]) {
-  return bookings.reduce<Record<string, number>>((totals, booking) => {
-    totals[booking.production_stage_id] = (totals[booking.production_stage_id] || 0) + booking.container_quantity;
-    return totals;
-  }, {});
-}
-
-export function summariseJobs(jobs: ProcurementJob[], stages: ProductionStage[], bookings: FreightBooking[]): JobSummary[] {
-  const booked = bookedByStage(bookings);
+export function summariseJobs(jobs: ProcurementJob[], stages: ProductionStage[]): JobSummary[] {
   return jobs.map(job => {
-    // Tentative stages are not part of the confirmed plan yet.
-    const jobStages = stages.filter(stage => stage.procurement_job_id === job.id && !stage.tentative);
-    const jobBookings = bookings.filter(booking => booking.procurement_job_id === job.id);
+    const all = stages.filter(stage => stage.procurement_job_id === job.id).map(stage => ({ ...stage, procurement_jobs: stage.procurement_jobs ?? job }));
+    const jobStages = all.filter(stage => stageStatusOf(stage) !== "Tentative");
     const ordered = job.total_containers ?? 0;
-    const planned = jobStages.reduce((sum, stage) => sum + stage.container_quantity, 0);
-    const bookedTotal = jobBookings.reduce((sum, booking) => sum + booking.container_quantity, 0);
-    const shipped = jobBookings.filter(booking => SHIPPED_STATUSES.includes(booking.status)).reduce((sum, booking) => sum + booking.container_quantity, 0);
-    const toBook = jobStages.reduce((sum, stage) => sum + Math.max(0, stage.container_quantity - (booked[stage.id] || 0)), 0);
-    const worstLateDays = Math.max(0, ...jobStages.map(stage => lateDays(stage.timing_status)));
+    const sum = (list: ProductionStage[]) => list.reduce((n, stage) => n + stage.container_quantity, 0);
+    const planned = sum(jobStages);
+    const dispatched = sum(jobStages.filter(isDispatched));
+    const arrived = sum(jobStages.filter(stage => stageStatusOf(stage) === "Arrived"));
+    const tentative = sum(all.filter(stage => stageStatusOf(stage) === "Tentative"));
+    const notArrived = jobStages.filter(stage => stageStatusOf(stage) !== "Arrived");
+    const worstLateDays = Math.max(0, ...notArrived.map(stage => lateDays(stage.timing_status)));
     const forecastOnSite = jobStages.reduce<string | null>((latest, stage) => !latest || stage.forecast_site_eta > latest ? stage.forecast_site_eta : latest, null);
+    // The stage the job is up to: the earliest one not yet arrived, tentative included.
+    const next = all.filter(stage => stageStatusOf(stage) !== "Arrived").sort((a, b) => a.goods_ready_date.localeCompare(b.goods_ready_date))[0];
+    const currentStage = next ? `${next.stage_reference.replace(job.client_name, "").trim() || next.stage_reference} · ${stageStatusOf(next)}` : jobStages.length ? "All arrived" : null;
     return {
-      job, orderType: orderTypeOf(job), forecastOnSite, stages: jobStages, ordered, planned, booked: bookedTotal, shipped,
-      toPlan: Math.max(0, ordered - planned), toBook, worstLateDays,
+      job, status: jobStatusOf(job, stages), orderType: orderTypeOf(job), forecastOnSite, stages: jobStages, currentStage, ordered, planned, dispatched, arrived, tentative,
+      toPlan: Math.max(0, ordered - planned), worstLateDays,
       timing: jobStages.length === 0 ? "Not planned" : worstLateDays > 0 ? "Late" : "Within target",
     };
   });
@@ -114,16 +111,15 @@ export function capacityRows(suppliers: Supplier[], overrides: SupplierCapacityO
     .filter(row => row.months.some(month => month.capacity !== null || month.planned > 0));
 }
 
-export function attentionItems(summaries: JobSummary[], bookings: FreightBooking[], capacity: CapacityRow[], today: string): AttentionItem[] {
+export function attentionItems(summaries: JobSummary[], capacity: CapacityRow[], today: string): AttentionItem[] {
   const items: AttentionItem[] = [];
-  const booked = bookedByStage(bookings);
 
   for (const summary of summaries) {
     const { job } = summary;
     const label = jobLabel(job);
-    const allShipped = summary.ordered > 0 && summary.shipped >= summary.ordered;
+    const allArrived = summary.ordered > 0 && summary.arrived >= summary.ordered;
 
-    if (summary.worstLateDays > 0 && !allShipped) {
+    if (summary.worstLateDays > 0 && !allArrived) {
       const stage = summary.stages.reduce((worst, current) => lateDays(current.timing_status) > lateDays(worst.timing_status) ? current : worst);
       items.push({
         id: `late-${job.id}`, severity: "high", category: "Late", jobId: job.id,
@@ -133,45 +129,18 @@ export function attentionItems(summaries: JobSummary[], bookings: FreightBooking
       });
     }
 
+    // Confirmed stages whose planned dispatch date has passed but are not marked dispatched yet.
     for (const stage of summary.stages) {
-      const unbooked = stage.container_quantity - (booked[stage.id] || 0);
-      if (unbooked <= 0) continue;
-      const daysToEtd = daysBetween(today, stage.planned_etd);
-      if (daysToEtd > FREIGHT_DUE_DAYS) continue;
+      if (stageStatusOf(stage) !== "Confirmed" || stage.goods_ready_date >= today) continue;
       items.push({
-        id: `book-${stage.id}`, severity: daysToEtd < 0 ? "high" : "medium", category: "Freight to book", jobId: job.id,
-        title: `${plural(unbooked, "container")} not booked for ${label}`,
-        detail: daysToEtd < 0
-          ? `${stage.stage_reference} ETD was ${formatDate(stage.planned_etd)} (${plural(-daysToEtd, "day")} ago).`
-          : `${stage.stage_reference} ETD ${formatDate(stage.planned_etd)} (in ${plural(daysToEtd, "day")}).`,
-        href: `/freight?stage=${stage.id}`,
-      });
-    }
-
-    if (job.status === "Fully Dispatched" && !allShipped) {
-      items.push({
-        id: `status-dispatched-${job.id}`, severity: "medium", category: "Status check", jobId: job.id,
-        title: `${label} is marked Fully Dispatched`,
-        detail: `But only ${summary.shipped} of ${summary.ordered} containers have a dispatched freight booking.`,
-        href: "/procurement",
-      });
-    } else if (job.status === "Awaiting Confirmation" && summary.stages.length > 0) {
-      items.push({
-        id: `status-awaiting-${job.id}`, severity: "medium", category: "Status check", jobId: job.id,
-        title: `${label} is still Awaiting Confirmation`,
-        detail: `But ${plural(summary.planned, "container")} are already in the production plan.`,
-        href: "/procurement",
-      });
-    } else if ((job.status === "In Production" || job.status === "Production Completed") && summary.stages.length === 0) {
-      items.push({
-        id: `status-noplan-${job.id}`, severity: "medium", category: "Status check", jobId: job.id,
-        title: `${label} is marked ${job.status}`,
-        detail: "But it has no production stages planned.",
+        id: `dispatch-${stage.id}`, severity: "medium", category: "Update dispatch", jobId: job.id,
+        title: `Has ${label} ${stage.stage_reference.replace(job.client_name, "").trim() || stage.stage_reference} dispatched?`,
+        detail: `Planned dispatch was ${formatDate(stage.goods_ready_date)} (${plural(daysBetween(stage.goods_ready_date, today), "day")} ago). Update its status on the Dispatch Plan.`,
         href: "/production",
       });
     }
 
-    if (job.status === "Awaiting Confirmation" && summary.stages.length === 0) {
+    if (summary.status === "Awaiting Confirmation") {
       const waiting = daysBetween(job.created_at, today);
       if (waiting >= AWAITING_CONFIRMATION_DAYS) {
         items.push({
@@ -181,33 +150,14 @@ export function attentionItems(summaries: JobSummary[], bookings: FreightBooking
           href: "/procurement",
         });
       }
-    } else if (job.status !== "Fully Dispatched" && summary.toPlan > 0) {
+    } else if (summary.status !== "Fully Dispatched" && summary.toPlan > 0) {
       items.push({
         id: `plan-${job.id}`, severity: "low", category: "To plan", jobId: job.id,
-        title: `${plural(summary.toPlan, "container")} of ${label} not in the production plan`,
-        detail: `${summary.planned} of ${summary.ordered} ordered containers are planned.`,
+        title: summary.tentative >= summary.toPlan
+          ? `${plural(summary.toPlan, "container")} of ${label} still tentative`
+          : `${plural(summary.toPlan, "container")} of ${label} not confirmed on the dispatch plan`,
+        detail: `${summary.planned} of ${summary.ordered} ordered containers have a confirmed stage${summary.tentative ? `; ${summary.tentative} are tentative` : ""}.`,
         href: "/production",
-      });
-    }
-  }
-
-  const stageLate = new Map(summaries.flatMap(summary => summary.stages.map(stage => [stage.id, lateDays(stage.timing_status)] as const)));
-  for (const booking of bookings) {
-    if (booking.status === "Completed") continue;
-    const label = booking.procurement_jobs ? jobLabel(booking.procurement_jobs) : booking.shipment_reference;
-    if (booking.risk === "Off Track") {
-      items.push({
-        id: `offtrack-${booking.id}`, severity: "high", category: "Freight off track", jobId: booking.procurement_job_id,
-        title: `${booking.shipment_reference} is off track`,
-        detail: `${label} · ETA ${formatDate(booking.planned_eta)}${booking.comments ? ` · ${booking.comments}` : ""}.`,
-        href: "/freight",
-      });
-    } else if ((stageLate.get(booking.production_stage_id) || 0) > 0) {
-      items.push({
-        id: `risk-${booking.id}`, severity: "medium", category: "Status check", jobId: booking.procurement_job_id,
-        title: `${booking.shipment_reference} is marked On Track`,
-        detail: `But its production stage is forecast ${plural(stageLate.get(booking.production_stage_id) || 0, "day")} late.`,
-        href: "/freight",
       });
     }
   }

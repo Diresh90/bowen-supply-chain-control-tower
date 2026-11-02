@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo } from "react";
-import type { ProcurementJob, ProductionStage, SupplierCapacityOverride } from "@/lib/database.types";
+import { dispatchStatuses, type DispatchStatus, type ProcurementJob, type ProductionStage, type SupplierCapacityOverride } from "@/lib/database.types";
+import { stageStatusOf } from "@/lib/jobs";
 import { jobLabel } from "@/lib/dashboard";
 import { capacityMetrics, capacityMonth, dateKey, mondayOf } from "@/lib/production";
 
@@ -9,7 +10,7 @@ const MONTHS = 3;
 const WEEK_MS = 7 * 86_400_000;
 
 // date = planned dispatch date (goods leave the supplier).
-type Row = { id: string; po: string; detail: string; containers: number; date: string; tentative: boolean; stage: ProductionStage };
+type Row = { id: string; po: string; detail: string; containers: number; date: string; status: DispatchStatus; stage: ProductionStage };
 
 function poOf(job: ProcurementJob) {
   const po = job.supplier_po_number?.trim();
@@ -46,8 +47,8 @@ export function DispatchGrid({ stages, overrides, supplierId, loading, onEdit }:
     .filter(s => s.goods_ready_date >= rangeStart && s.goods_ready_date <= rangeEnd)
     .map(s => ({
       id: s.id, po: poOf(s.procurement_jobs),
-      detail: detailOf(s.procurement_jobs, poOf(s.procurement_jobs), [s.stage_reference.replace(s.procurement_jobs.client_name, "").trim() || s.stage_reference, s.tentative ? "Tentative" : null].filter(Boolean).join(" · ")),
-      containers: s.container_quantity, date: s.goods_ready_date, tentative: !!s.tentative, stage: s,
+      detail: detailOf(s.procurement_jobs, poOf(s.procurement_jobs), `${s.stage_reference.replace(s.procurement_jobs.client_name, "").trim() || s.stage_reference} · ${stageStatusOf(s)}`),
+      containers: s.container_quantity, date: s.goods_ready_date, status: stageStatusOf(s), stage: s,
     }))
     .sort((a, b) => a.date.localeCompare(b.date)), [stages, rangeStart, rangeEnd]);
 
@@ -78,16 +79,16 @@ export function DispatchGrid({ stages, overrides, supplierId, loading, onEdit }:
       <tbody>
         {loading ? <tr><td colSpan={weeks.length + 2} className="empty">Loading dispatch plan…</td></tr> : rows.length === 0 ? <tr><td colSpan={weeks.length + 2} className="empty"><strong>Nothing dispatching in the next {MONTHS} months</strong><span>Add a stage with a planned dispatch date to see it here.</span></td></tr> : rows.map(row => {
           const rowWeek = weekOf(row.date);
-          return <tr key={row.id} className={row.tentative ? "pending-row" : ""}>
+          return <tr key={row.id} className={row.status === "Tentative" ? "pending-row" : ""}>
             <td className="dispatch-po"><strong>{row.po}</strong><small>{row.detail}</small></td>
             {weeks.map(w => <td key={w} className={w === thisWeek ? "this-week" : ""}>{w === rowWeek &&
-              <button className={`dispatch-chip${row.tentative ? " pending tentative" : ""}`} onClick={() => onEdit(row.stage)} title={`Planned dispatch ${row.date}${row.tentative ? " · tentative" : ""}`}>{row.containers}</button>}</td>)}
+              <button className={`dispatch-chip status-${row.status.toLowerCase()}${row.status === "Tentative" ? " pending tentative" : ""}`} onClick={() => onEdit(row.stage)} title={`${row.status} · planned dispatch ${row.date}`}>{row.containers}</button>}</td>)}
             <td className="dispatch-total">{row.containers}</td>
           </tr>;
         })}
       </tbody>
       {!loading && rows.length > 0 && <tfoot><tr><td className="dispatch-po">Dispatching per week</td>{weeks.map(w => <td key={w} className={w === thisWeek ? "this-week" : ""}>{weekTotal(w) || ""}</td>)}<td className="dispatch-total">{rows.reduce((n, r) => n + r.containers, 0)}</td></tr></tfoot>}
     </table></div>
-    <p className="dispatch-legend"><span className="dispatch-chip">8</span> Planned <span className="dispatch-chip pending">8</span> Tentative (dashed) · both count toward the month&apos;s capacity, by planned dispatch date</p>
+    <p className="dispatch-legend">{dispatchStatuses.map(status => <span key={status} className="dispatch-legend-item"><span className={`dispatch-chip status-${status.toLowerCase()}${status === "Tentative" ? " pending tentative" : ""}`}>8</span> {status}</span>)}<span>· every stage counts toward its month&apos;s capacity</span></p>
   </section>;
 }

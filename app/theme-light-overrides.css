@@ -28,3 +28,9 @@
 
 /* Tentative / awaiting confirmation stays clearly different from planned: dashed grey outline, no fill. */
 :root[data-theme="light"] .dispatch-chip.pending{background:#ffffff;border:1.5px dashed #8a99a6;color:#4a5a67}
+
+/* Light mode: dispatch status chips keep clear, readable colours. */
+:root[data-theme="light"] .dispatch-chip.status-confirmed{background:#e6f1fc;border-color:#9cc8f2;color:#0c5ea8}
+:root[data-theme="light"] .dispatch-chip.status-dispatched{background:#efeafe;border-color:#bfb0f3;color:#4b35a8}
+:root[data-theme="light"] .dispatch-chip.status-sailed{background:#e3f6f7;border-color:#93d4da;color:#11666e}
+:root[data-theme="light"] .dispatch-chip.status-arrived{background:#e9f7ef;border-color:#9fd8b6;color:#1f6b43}

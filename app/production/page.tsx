@@ -4,9 +4,10 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { Notice } from "@/components/notice";
 import { DispatchGrid } from "@/components/dispatch-grid";
-import { PlanningMode, ProcurementJob, ProductionPriority, ProductionStage, productionPriorities, Supplier, SupplierCapacityOverride, SupplierProductionSetting } from "@/lib/database.types";
+import { DispatchStatus, dispatchStatuses, PlanningMode, ProcurementJob, ProductionPriority, ProductionStage, productionPriorities, Supplier, SupplierCapacityOverride, SupplierProductionSetting } from "@/lib/database.types";
+import { DESTINATION_PORTS, ORIGIN_PORT, freightTotals } from "@/lib/freight";
 import { addWeeks, backwardDeadlines, calculateBackwardSchedule, calculateProductionSchedule, capacityMetrics, capacityMonth, plannedBySupplierMonth } from "@/lib/production";
-import { orderTypeOf } from "@/lib/jobs";
+import { orderTypeOf, stageStatusOf } from "@/lib/jobs";
 import { configurationError, supabaseRequest } from "@/lib/supabase";
 
 const visibleStatuses = new Set(["Confirmed", "In Production", "Production Completed", "Fully Dispatched"]);
@@ -16,7 +17,8 @@ const emptyForm = {
   queue_sequence: "1", destination: "", dispatch_date: "", production_duration_weeks: "5",
   dispatch_duration_weeks: "2", transit_duration_weeks: "6", destination_duration_weeks: "1",
   required_site_date: "", allocation_override: false,
-  planning_mode: "backward" as PlanningMode, tentative: false,
+  planning_mode: "backward" as PlanningMode, dispatch_status: "Confirmed" as DispatchStatus,
+  ocean_freight_usd: "", peak_season_surcharge_usd: "", other_surcharges_usd: "", local_charges_aud: "", usd_aud_rate: "",
 };
 
 type Tab = "dispatch" | "capacity";
@@ -42,6 +44,30 @@ function scheduleFor(form: StageForm) {
   if (form.planning_mode === "backward") return calculateBackwardSchedule({ ...weeks, requiredSiteDate: form.required_site_date, supplierReadyDate: form.dispatch_date || null });
   const productionStart = addWeeks(form.dispatch_date, -weeks.productionWeeks);
   return { production_start: productionStart, ...calculateProductionSchedule({ ...weeks, productionStart, requiredSiteDate: form.required_site_date }) };
+}
+
+// Form text <-> nullable number.
+function text(value: number | string | null | undefined) { return value === null || value === undefined ? "" : String(value); }
+function money(value: string) { return value.trim() === "" ? null : Number(value); }
+
+const usd = new Intl.NumberFormat("en-AU", { style: "currency", currency: "USD", currencyDisplay: "code", maximumFractionDigits: 0 });
+const aud = new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", currencyDisplay: "code", maximumFractionDigits: 0 });
+
+// Freight for this shipment, entered per 40ft container. USD charges convert to AUD with the entered rate.
+function FreightFields({ form, setForm }: { form: StageForm; setForm: (form: StageForm) => void }) {
+  const totals = freightTotals({ container_quantity: Number(form.container_quantity) || 0, ocean_freight_usd: money(form.ocean_freight_usd), peak_season_surcharge_usd: money(form.peak_season_surcharge_usd), other_surcharges_usd: money(form.other_surcharges_usd), local_charges_aud: money(form.local_charges_aud), usd_aud_rate: money(form.usd_aud_rate) });
+  const field = (label: string, key: "ocean_freight_usd" | "peak_season_surcharge_usd" | "other_surcharges_usd" | "local_charges_aud" | "usd_aud_rate", step = "0.01") =>
+    <label>{label}<input type="number" min="0" step={step} value={form[key]} onChange={e => setForm({ ...form, [key]: e.target.value })} /></label>;
+  return <fieldset className="freight-fields full"><legend>Freight · per 40ft container · {ORIGIN_PORT} → {form.destination || "destination"}</legend><div className="form-grid">
+    {field("Ocean freight (USD)", "ocean_freight_usd")}{field("Peak season surcharge (USD)", "peak_season_surcharge_usd")}
+    {field("Other surcharges (USD)", "other_surcharges_usd")}{field("USD → AUD rate", "usd_aud_rate", "0.0001")}
+    {field("Local charges (AUD)", "local_charges_aud")}
+    <div className="freight-totals">
+      <span>Sea freight <b>{totals.seaUsd === null ? "—" : `${usd.format(totals.seaUsd)}${totals.seaAud !== null ? ` (${aud.format(totals.seaAud)})` : ""}`}</b></span>
+      <span>Local charges <b>{totals.localAud === null ? "—" : aud.format(totals.localAud)}</b></span>
+      <span>Total freight <b>{totals.totalAud === null ? (totals.seaUsd !== null ? "Add the USD → AUD rate" : "—") : aud.format(totals.totalAud)}</b></span>
+    </div>
+  </div></fieldset>;
 }
 
 function scheduleReady(form: StageForm) {
@@ -99,19 +125,20 @@ export default function ProductionPage() {
   const productionSuppliers = suppliers.filter(supplier => supplier.active);
 
   // Defaults when a job is picked for a new stage: next stage number, containers still to plan,
-  // the job's required date and planning method. Orders awaiting confirmation start as tentative.
+  // the job's required date and planning method. Orders awaiting confirmation start as Tentative.
   function newStageDefaults(job: ProcurementJob) {
     const remaining = Math.max(0, (job.total_containers || 0) - (allocatedByJob[job.id] || 0));
     return {
       procurement_job_id: job.id, stage_reference: `${job.client_name} Stage ${stages.filter(s => s.procurement_job_id === job.id).length + 1}`,
       container_quantity: remaining ? String(remaining) : "", required_site_date: job.required_onsite_date || "",
-      planning_mode: (isStockOrder(job) ? "forward" : "backward") as PlanningMode, tentative: job.status === "Awaiting Confirmation",
+      planning_mode: (isStockOrder(job) ? "forward" : "backward") as PlanningMode, dispatch_status: (job.status === "Awaiting Confirmation" ? "Tentative" : "Confirmed") as DispatchStatus,
     };
   }
 
   function startNew() {
     setEditing(null);
-    setForm({ ...emptyForm, queue_sequence: String(stages.length + 1) });
+    const lastFx = [...stages].filter(stage => stage.usd_aud_rate).sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]?.usd_aud_rate;
+    setForm({ ...emptyForm, queue_sequence: String(stages.length + 1), usd_aud_rate: text(lastFx) });
     setOpen(true); setMessage(null);
   }
 
@@ -126,7 +153,7 @@ export default function ProductionPage() {
 
   function startEdit(stage: ProductionStage) {
     setEditing(stage);
-    setForm({ procurement_job_id: stage.procurement_job_id, stage_reference: stage.stage_reference, container_quantity: String(stage.container_quantity), priority: stage.priority, queue_sequence: String(stage.queue_sequence), destination: stage.destination || "", production_duration_weeks: String(stage.production_duration_weeks), dispatch_duration_weeks: String(stage.dispatch_duration_weeks), transit_duration_weeks: String(stage.transit_duration_weeks), destination_duration_weeks: String(stage.destination_duration_weeks), required_site_date: stage.required_site_date, allocation_override: stage.allocation_override, tentative: !!stage.tentative, ...editModeFor(stage) });
+    setForm({ procurement_job_id: stage.procurement_job_id, stage_reference: stage.stage_reference, container_quantity: String(stage.container_quantity), priority: stage.priority, queue_sequence: String(stage.queue_sequence), destination: stage.destination || "", production_duration_weeks: String(stage.production_duration_weeks), dispatch_duration_weeks: String(stage.dispatch_duration_weeks), transit_duration_weeks: String(stage.transit_duration_weeks), destination_duration_weeks: String(stage.destination_duration_weeks), required_site_date: stage.required_site_date, allocation_override: stage.allocation_override, dispatch_status: stageStatusOf(stage), ocean_freight_usd: text(stage.ocean_freight_usd), peak_season_surcharge_usd: text(stage.peak_season_surcharge_usd), other_surcharges_usd: text(stage.other_surcharges_usd), local_charges_aud: text(stage.local_charges_aud), usd_aud_rate: text(stage.usd_aud_rate), ...editModeFor(stage) });
     setOpen(true); setMessage(null);
   }
 
@@ -142,7 +169,7 @@ export default function ProductionPage() {
       return;
     }
     const schedule = scheduleFor(form);
-    const payload = { procurement_job_id: job.id, supplier_id: job.supplier_id, stage_reference: form.stage_reference.trim(), container_quantity: quantity, priority: form.priority, queue_sequence: Number(form.queue_sequence), destination: form.destination.trim() || null, production_duration_weeks: Number(form.production_duration_weeks), dispatch_duration_weeks: Number(form.dispatch_duration_weeks), transit_duration_weeks: Number(form.transit_duration_weeks), destination_duration_weeks: Number(form.destination_duration_weeks), required_site_date: form.required_site_date, allocation_override: form.allocation_override, planning_mode: form.planning_mode, supplier_ready_date: form.planning_mode === "backward" ? form.dispatch_date || null : null, tentative: form.tentative, ...schedule };
+    const payload = { procurement_job_id: job.id, supplier_id: job.supplier_id, stage_reference: form.stage_reference.trim(), container_quantity: quantity, priority: form.priority, queue_sequence: Number(form.queue_sequence), destination: form.destination.trim() || null, production_duration_weeks: Number(form.production_duration_weeks), dispatch_duration_weeks: Number(form.dispatch_duration_weeks), transit_duration_weeks: Number(form.transit_duration_weeks), destination_duration_weeks: Number(form.destination_duration_weeks), required_site_date: form.required_site_date, allocation_override: form.allocation_override, planning_mode: form.planning_mode, supplier_ready_date: form.planning_mode === "backward" ? form.dispatch_date || null : null, dispatch_status: form.dispatch_status, tentative: form.dispatch_status === "Tentative", ocean_freight_usd: money(form.ocean_freight_usd), peak_season_surcharge_usd: money(form.peak_season_surcharge_usd), other_surcharges_usd: money(form.other_surcharges_usd), local_charges_aud: money(form.local_charges_aud), usd_aud_rate: money(form.usd_aud_rate), ...schedule };
     setSaving(true); setMessage(null);
     try {
       if (editing) await supabaseRequest(`production_stages?id=eq.${editing.id}`, { method: "PATCH", body: payload });
@@ -186,8 +213,9 @@ export default function ProductionPage() {
       <div className="planning-mode full"><strong>{form.planning_mode === "backward" ? "Project order · planned back from the on-site date" : "Stock order · planned forward from dispatch"}</strong><span>{form.planning_mode === "backward" ? "Enter the planned dispatch date to see if it lands on time." : "Enter the planned dispatch date; production start is worked out from it."}</span></div>
       <label>Required on-site date *<input required type="date" value={form.required_site_date} onChange={e => setForm({...form, required_site_date:e.target.value})} /></label>
       <label>Planned dispatch date{form.planning_mode === "forward" ? " *" : ""}<input required={form.planning_mode === "forward"} type="date" value={form.dispatch_date} onChange={e => setForm({...form, dispatch_date:e.target.value})} /></label>
-      <label className="check full"><input type="checkbox" checked={form.tentative} onChange={e => setForm({...form, tentative: e.target.checked})} /> Tentative: dispatch date not confirmed yet (shown dashed on the dispatch plan; still counts toward capacity). Orders awaiting confirmation can be planned tentatively.</label>
-      <label className="full">Destination<input value={form.destination} onChange={e => setForm({...form, destination:e.target.value})} placeholder="Optional destination" /></label>
+      <div className="full dispatch-status-field"><span>Dispatch status</span><div className="status-steps" role="radiogroup" aria-label="Dispatch status">{dispatchStatuses.map(status => <button type="button" role="radio" aria-checked={form.dispatch_status === status} key={status} className={`status-step ${status.toLowerCase()}${form.dispatch_status === status ? " selected" : ""}`} onClick={() => setForm({ ...form, dispatch_status: status })}>{status}</button>)}</div><small>Tentative is shown dashed. Every status counts toward capacity. Dispatched, Sailed and Arrived count as dispatched on the job and dashboard.</small></div>
+      <label className="full">Destination port<input list="destination-ports" value={form.destination} onChange={e => setForm({...form, destination:e.target.value})} placeholder="Brisbane, Sydney or Melbourne" /><datalist id="destination-ports">{DESTINATION_PORTS.map(port => <option key={port} value={port} />)}</datalist></label>
+      <FreightFields form={form} setForm={setForm} />
       {scheduleReady(form) && <SchedulePreview form={form} />}
       <details className="adjust-timings full"><summary>Adjust timings, priority and queue</summary><div className="form-grid">
         <label>Production (weeks)<input required type="number" min="0" value={form.production_duration_weeks} onChange={e => setForm({...form, production_duration_weeks:e.target.value})} /></label>
