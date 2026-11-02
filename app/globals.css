@@ -220,3 +220,7 @@ nav { padding:47px 9px 0; display:grid; gap:3px; } nav a,.settings-link { positi
 .theme-toggle{display:inline-flex;align-items:center;gap:6px;margin-right:auto;background:#101d28;border:1px solid #1d2d3b;border-radius:16px;color:#c8d0d7;padding:6px 12px;font-size:11px;cursor:pointer}
 .theme-toggle:hover{border-color:#52baff;color:#f1f4f7}
 .theme-toggle span{font-size:13px;line-height:1}
+
+/* Production header: add stage + supplier filter; delete inside the stage form */
+.production-actions{display:flex;align-items:flex-end;gap:14px}
+.modal-actions .stage-delete{margin-right:auto;background:transparent;border:0;padding:8px 4px;font-size:12px;cursor:pointer}
