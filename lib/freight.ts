@@ -54,33 +54,45 @@ export function spendByMonth(stages: (ProductionStage & { isTentative: boolean }
 }
 
 // entered = from freight on Dispatch Plan stages; history = imported monthly market rates.
-export type RatePoint = { month: string; port: string; rateUsd: number; containers: number; source: "entered" | "history" };
+// Dashboard rate lanes, all into Melbourne. Craftsman ships from Nhava Sheva; Shanghai is market history for comparison.
+export const RATE_LANES = [
+  { lane: "Nhava Sheva → MEL", originCode: "NSA" },
+  { lane: "Shanghai → MEL", originCode: "CNSHA" },
+] as const;
+export type RateLane = (typeof RATE_LANES)[number]["lane"];
 
-// Imported historical 40ft rates from Nhava Sheva (origin code NSA) per destination port and month.
+// entered = from freight on Dispatch Plan stages; history = imported monthly market rates.
+export type RatePoint = { month: string; lane: RateLane; rateUsd: number; containers: number; source: "entered" | "history" };
+
+// Imported historical 40ft rates into Melbourne for the dashboard lanes.
 export function historicalRates(rates: FreightRate[]): RatePoint[] {
-  return rates
-    .filter(rate => rate.origin_code === "NSA" && rate.original_currency === "USD" && /^40/.test(rate.container_type ?? "40") && rate.sea_freight_rate_original !== null)
-    .map(rate => ({ month: capacityMonth(rate.rate_month), port: destinationPort(rate.destination?.name) ?? "", rateUsd: Number(rate.sea_freight_rate_original), containers: 0, source: "history" as const }))
-    .filter(point => point.port);
+  const points: RatePoint[] = [];
+  for (const rate of rates) {
+    const lane = RATE_LANES.find(item => item.originCode === rate.origin_code)?.lane;
+    if (!lane || rate.original_currency !== "USD" || rate.sea_freight_rate_original === null || !/^40/.test(rate.container_type ?? "40")) continue;
+    if (destinationPort(rate.destination?.name) !== "Melbourne") continue;
+    points.push({ month: capacityMonth(rate.rate_month), lane, rateUsd: Number(rate.sea_freight_rate_original), containers: 0, source: "history" });
+  }
+  return points;
 }
 
-// Rate trend per port and month: rates entered on stages, falling back to imported history for months without them.
+// Rate trend per lane and month: rates entered on stages, falling back to imported history for months without them.
 export function rateTrend(stages: ProductionStage[], history: RatePoint[] = []): RatePoint[] {
   const entered = enteredRates(stages);
-  const covered = new Set(entered.map(point => `${point.port}:${point.month}`));
-  return [...entered, ...history.filter(point => !covered.has(`${point.port}:${point.month}`))].sort((a, b) => a.month.localeCompare(b.month));
+  const covered = new Set(entered.map(point => `${point.lane}:${point.month}`));
+  return [...entered, ...history.filter(point => !covered.has(`${point.lane}:${point.month}`))].sort((a, b) => a.month.localeCompare(b.month));
 }
 
-// Average USD all-in 40ft rate from Nhava Sheva per destination port and dispatch month, weighted by containers.
+// Average USD all-in 40ft rate on stages shipping Nhava Sheva → Melbourne, per dispatch month, weighted by containers.
 function enteredRates(stages: ProductionStage[]): RatePoint[] {
-  const buckets = new Map<string, { month: string; port: string; total: number; containers: number }>();
+  const buckets = new Map<string, { month: string; total: number; containers: number }>();
   for (const stage of stages) {
-    const rate = seaRateUsd(stage), port = destinationPort(stage.destination);
-    if (rate === null || !port || !stage.container_quantity) continue;
-    const month = capacityMonth(stage.goods_ready_date), key = `${port}:${month}`;
-    const bucket = buckets.get(key) ?? { month, port, total: 0, containers: 0 };
+    const rate = seaRateUsd(stage);
+    if (rate === null || destinationPort(stage.destination) !== "Melbourne" || !stage.container_quantity) continue;
+    const month = capacityMonth(stage.goods_ready_date);
+    const bucket = buckets.get(month) ?? { month, total: 0, containers: 0 };
     bucket.total += rate * stage.container_quantity; bucket.containers += stage.container_quantity;
-    buckets.set(key, bucket);
+    buckets.set(month, bucket);
   }
-  return [...buckets.values()].map(b => ({ month: b.month, port: b.port, rateUsd: b.total / b.containers, containers: b.containers, source: "entered" as const }));
+  return [...buckets.values()].map(b => ({ month: b.month, lane: "Nhava Sheva → MEL" as const, rateUsd: b.total / b.containers, containers: b.containers, source: "entered" as const }));
 }

@@ -275,3 +275,10 @@ nav { padding:47px 9px 0; display:grid; gap:3px; } nav a,.settings-link { positi
 /* Rate chart legend items are text, not colour swatches */
 .db-legend .db-rate-key{width:auto;height:auto;border-radius:0;margin-left:0;font-size:11px}
 .db-legend .db-rate-key i{width:12px;height:3px}
+
+/* Dashboard: full-width rate chart */
+.db-rates-full{margin-bottom:14px;padding-bottom:8px}
+.db-rates-full .db-rate-chart{padding:0 18px}
+.db-rates-full .db-rate-chart text{font-size:13px}
+.db-rates-full .db-rate-chart text.db-rate-end{font-size:14px;font-weight:700}
+.db-rates-full .db-legend{font-size:12px}

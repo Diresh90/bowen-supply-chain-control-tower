@@ -8,7 +8,7 @@ import { FreightRate, OrderType, ProcurementJob, ProductionStage, Supplier, Supp
 import { AttentionItem, Severity, STANDARD_WEEKS, attentionItems, capacityRows, daysBetween, estimateNewOrder, formatDate, jobLabel, summariseJobs } from "@/lib/dashboard";
 import { capacityMonth, dateKey, mondayOf } from "@/lib/production";
 import { jobStatuses, stageStatusOf, statusClass, statusColours } from "@/lib/jobs";
-import { DESTINATION_PORTS, ORIGIN_PORT, type RatePoint, historicalRates, rateTrend, spendByMonth } from "@/lib/freight";
+import { RATE_LANES, type RateLane, type RatePoint, historicalRates, rateTrend } from "@/lib/freight";
 import { configurationError, supabaseRequest } from "@/lib/supabase";
 
 const severityLabel: Record<Severity, string> = { high: "Act now", medium: "Check", low: "Follow up" };
@@ -42,7 +42,7 @@ export default function Home() {
       supabaseRequest<Supplier[]>("suppliers?select=*&active=eq.true&order=name.asc"),
       supabaseRequest<SupplierCapacityOverride[]>("supplier_capacity_overrides?select=*"),
     ]);
-    const rateData = supabaseRequest<FreightRate[]>("freight_rates?select=*,destination:locations!freight_rates_destination_location_id_fkey(*)&origin_code=eq.NSA&order=rate_month.asc");
+    const rateData = supabaseRequest<FreightRate[]>("freight_rates?select=*,destination:locations!freight_rates_destination_location_id_fkey(*)&origin_code=in.(NSA,CNSHA)&order=rate_month.asc");
     const [coreResult, capacityResult, rateResult] = await Promise.allSettled([coreData, capacityData, rateData]);
     setRateHistory(rateResult.status === "fulfilled" ? historicalRates(rateResult.value) : []);
     if (coreResult.status === "fulfilled") {
@@ -81,14 +81,10 @@ export default function Home() {
   const quoteQty = Math.max(1, Math.round(Number(quoteContainers) || 1));
   const estimate = estimateNewOrder(capacityRow, quoteQty, today);
 
-  // Freight: spend for 3 months back to 2 ahead; rate trend over the last 6 months and next 2.
+  // Rate trend: the last 12 months and the next 2.
   const monthKey = (offset: number) => { const d = new Date(`${today}T00:00:00Z`); return capacityMonth(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + offset, 1))); };
-  const spendMonths = spendByMonth(stages.map(stage => ({ ...stage, isTentative: stageStatusOf(stage) === "Tentative" })), [-3, -2, -1, 0, 1, 2].map(monthKey));
-  const spendMax = Math.max(1, ...spendMonths.map(m => m.totalAud));
-  const missingFx = spendMonths.reduce((n, m) => n + m.missingFx, 0);
   const trendMonths = [-11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1, 0, 1, 2].map(monthKey);
   const trend = rateTrend(stages, rateHistory).filter(point => trendMonths.includes(point.month));
-  const aud = new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 });
 
   // Orders table
   const managers = [...new Set(jobs.map(job => job.project_manager).filter((m): m is string => !!m))].sort();
@@ -100,8 +96,6 @@ export default function Home() {
     .filter(s => managerFilter === "all" || s.job.project_manager === managerFilter)
     .filter(s => !query || [s.job.sales_order_number, s.job.client_name, s.job.supplier_po_number, s.job.project_manager, s.job.suppliers?.name].join(" ").toLowerCase().includes(query))
     .sort((a, b) => (a.forecastOnSite ?? a.job.required_onsite_date ?? "9999").localeCompare(b.forecastOnSite ?? b.job.required_onsite_date ?? "9999"));
-
-  const totals = summaries.reduce((t, s) => ({ ordered: t.ordered + s.ordered, planned: t.planned + s.planned, dispatched: t.dispatched + s.dispatched, arrived: t.arrived + s.arrived, toPlan: t.toPlan + s.toPlan }), { ordered: 0, planned: 0, dispatched: 0, arrived: 0, toPlan: 0 });
 
   return <AppShell>
     <header className="dashboard-head">
@@ -160,26 +154,10 @@ export default function Home() {
         <Link className="db-panel-link" href="/production">Manage capacity →</Link>
     </section>
 
-    <section className="db-grid db-freight">
-      <article className="dash-panel db-spend">
-        <h2>Freight spend by month</h2>
-        <p className="db-panel-note">AUD by planned dispatch month: ocean freight and surcharges (converted from USD) plus local charges.</p>
-        {!ready ? <div className="empty">Loading…</div> : spendMonths.every(m => m.totalAud === 0) ? <div className="db-freight-empty">No freight entered yet. Add it to stages on the Dispatch Plan.</div> : <div className="db-spend-chart">
-          {spendMonths.map(m => <div className="db-spend-col" key={m.month} title={`${m.label}: ${aud.format(m.totalAud)} across ${m.stages} stage${m.stages === 1 ? "" : "s"}${m.tentativeAud ? ` (${aud.format(m.tentativeAud)} tentative)` : ""}`}>
-            <span className="db-spend-value">{m.totalAud ? `${aud.format(Math.round(m.totalAud / 100) / 10)}k` : ""}</span>
-            <div className="db-spend-track"><span className="confirmed" style={{ height: `${(m.totalAud - m.tentativeAud) / spendMax * 100}%` }} /><span className="tentative" style={{ height: `${m.tentativeAud / spendMax * 100}%` }} /></div>
-            <span className={`db-cap-month${m.month === monthKey(0) ? " now" : ""}`}>{m.label}</span>
-          </div>)}
-        </div>}
-        {missingFx > 0 && <p className="db-freight-warning">{missingFx} stage{missingFx === 1 ? " has" : "s have"} USD charges but no USD → AUD rate, so {missingFx === 1 ? "it isn't" : "they aren't"} counted.</p>}
-        <p className="db-legend"><span className="db-key spend" /> Confirmed / dispatched <span className="db-key spend-tentative" /> Tentative</p>
-      </article>
-
-      <article className="dash-panel db-rates">
-        <h2>40ft rate trend · {ORIGIN_PORT}</h2>
-        <p className="db-panel-note">USD per container, all-in sea freight. Solid points are rates you entered on the Dispatch Plan; hollow points are imported market history.</p>
-        {!ready ? <div className="empty">Loading…</div> : trend.length === 0 ? <div className="db-freight-empty">No rates yet. Enter ocean freight on stages to start the trend.</div> : <RateChart months={trendMonths} points={trend} />}
-      </article>
+    <section className="dash-panel db-rates db-rates-full">
+      <h2>40ft sea freight rates into Melbourne</h2>
+      <p className="db-panel-note">USD per 40ft container, all-in sea freight. Solid points are rates you entered on the Dispatch Plan; hollow points are imported market history.</p>
+      {!ready ? <div className="empty">Loading…</div> : trend.length === 0 ? <div className="db-freight-empty">No rates yet. Import market history or enter ocean freight on stages to start the trend.</div> : <RateChart months={trendMonths} points={trend} />}
     </section>
 
     <section className="dash-panel all-jobs">
@@ -221,58 +199,40 @@ export default function Home() {
       <p className="db-legend"><span className="db-key planned" /> Planned <span className="db-key booked" /> Dispatched <span className="db-key shipped" /> Arrived · status and stage come from the Dispatch Plan</p>
     </section>
 
-    <section className="db-grid">
-      <article className="dash-panel db-attention">
-        <div className="all-jobs-title"><div><h2>Needs attention{ready && attention.length > 0 && <span className="db-count">{attention.length}</span>}</h2><p>Worked out from the Dispatch Plan and capacity.</p></div></div>
-        {!ready ? <div className="empty">Checking orders…</div> : attention.length === 0 ? <div className="db-all-clear">✓ Nothing needs attention right now.</div> :
-          <ul className="db-attention-list">
-            {attention.map(item => <li key={item.id} className={item.severity}>
-              <span className={`db-severity ${item.severity}`}>{severityLabel[item.severity]}</span>
-              <div><strong>{item.title}</strong><small>{item.category} · {item.detail}</small></div>
-              <Link href={item.href}>Open →</Link>
-            </li>)}
-          </ul>}
-      </article>
-
-      <article className="dash-panel db-pipeline">
-        <h2>Container pipeline</h2>
-        <p className="db-panel-note">All orders: ordered → planned (confirmed stages) → dispatched → arrived on site.</p>
-        {([["Ordered", totals.ordered, "On all jobs"], ["Planned", totals.planned, `${totals.toPlan} still to plan`], ["Dispatched", totals.dispatched, "Left the supplier, sailed or arrived"], ["Arrived", totals.arrived, "On site"]] as const).map(([label, value, note]) =>
-          <div className="db-pipe-row" key={label}>
-            <div className="db-pipe-label"><span>{label}</span><small>{show(note)}</small></div>
-            <div className="db-pipe-bar"><span style={{ width: `${totals.ordered ? Math.min(100, value / totals.ordered * 100) : 0}%` }} /></div>
-            <strong>{show(value)}</strong>
-          </div>)}
-        <Link className="db-panel-link" href="/production">Open the Dispatch Plan →</Link>
-      </article>
-    </section>
   </AppShell>;
 }
 
-const PORT_COLOURS: Record<string, string> = { Brisbane: "#378add", Sydney: "#1d9e75", Melbourne: "#d85a30" };
+const LANE_COLOURS: Record<RateLane, string> = { "Nhava Sheva → MEL": "#f0a020", "Shanghai → MEL": "#378add" };
 
 // Line per destination port; points are monthly average USD rates per 40ft container.
 function RateChart({ months, points }: { months: string[]; points: RatePoint[] }) {
-  const width = 520, height = 170, left = 46, right = 12, top = 12, bottom = 26;
+  const width = 1000, height = 340, left = 56, right = 70, top = 16, bottom = 30;
   const values = points.map(p => p.rateUsd);
   const min = Math.floor(Math.min(...values) * 0.9 / 100) * 100, max = Math.ceil(Math.max(...values) * 1.1 / 100) * 100 || 100;
   const x = (month: string) => left + months.indexOf(month) * ((width - left - right) / Math.max(1, months.length - 1));
   const y = (value: number) => top + (1 - (value - min) / Math.max(1, max - min)) * (height - top - bottom);
   const label = (month: string) => new Intl.DateTimeFormat("en-GB", { month: "short", timeZone: "UTC" }).format(new Date(`${month}T00:00:00Z`));
   const usd = new Intl.NumberFormat("en-AU", { style: "currency", currency: "USD", currencyDisplay: "code", maximumFractionDigits: 0 });
+  const endLabels = RATE_LANES.map(({ lane }) => {
+    const line = points.filter(p => p.lane === lane).sort((a, b) => a.month.localeCompare(b.month));
+    const last = line[line.length - 1];
+    return last ? { lane, x: x(last.month) + 9, y: y(last.rateUsd) + 4, text: Math.round(last.rateUsd).toLocaleString("en-AU") } : null;
+  }).filter((label): label is { lane: RateLane; x: number; y: number; text: string } => label !== null).sort((a, b) => a.y - b.y);
+  for (let i = 1; i < endLabels.length; i++) if (endLabels[i].y - endLabels[i - 1].y < 18) endLabels[i].y = endLabels[i - 1].y + 18;
   return <div className="db-rate-chart">
     <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="40ft rate trend by destination port">
       {[min, (min + max) / 2, max].map(v => <g key={v}><line x1={left} x2={width - right} y1={y(v)} y2={y(v)} className="grid" /><text x={left - 6} y={y(v) + 3} textAnchor="end">{Math.round(v).toLocaleString("en-AU")}</text></g>)}
       {months.map(m => <text key={m} x={x(m)} y={height - 8} textAnchor="middle">{label(m)}</text>)}
-      {DESTINATION_PORTS.map(port => {
-        const line = points.filter(p => p.port === port).sort((a, b) => a.month.localeCompare(b.month));
+      {RATE_LANES.map(({ lane }) => {
+        const line = points.filter(p => p.lane === lane).sort((a, b) => a.month.localeCompare(b.month));
         if (!line.length) return null;
-        return <g key={port} style={{ color: PORT_COLOURS[port] }}>
+        return <g key={lane} style={{ color: LANE_COLOURS[lane] }}>
           {line.length > 1 && <polyline fill="none" stroke="currentColor" strokeWidth="2.5" points={line.map(p => `${x(p.month)},${y(p.rateUsd)}`).join(" ")} />}
-          {line.map(p => <circle key={p.month} cx={x(p.month)} cy={y(p.rateUsd)} r="4" fill={p.source === "entered" ? "currentColor" : "var(--rate-hollow, #0b1620)"} stroke="currentColor" strokeWidth="2"><title>{`${port} · ${label(p.month)}: ${usd.format(p.rateUsd)} per 40ft · ${p.source === "entered" ? `entered (${p.containers} ctns)` : "market history"}`}</title></circle>)}
+          {line.map(p => <circle key={p.month} cx={x(p.month)} cy={y(p.rateUsd)} r="4" fill={p.source === "entered" ? "currentColor" : "var(--rate-hollow, #0b1620)"} stroke="currentColor" strokeWidth="2"><title>{`${lane} · ${label(p.month)}: ${usd.format(p.rateUsd)} per 40ft · ${p.source === "entered" ? `entered (${p.containers} ctns)` : "market history"}`}</title></circle>)}
         </g>;
       })}
+      {endLabels.map(label => <text key={label.lane} x={label.x} y={label.y} className="db-rate-end" fill={LANE_COLOURS[label.lane]}>{label.text}</text>)}
     </svg>
-    <p className="db-legend">{DESTINATION_PORTS.map(port => <span key={port} className="db-rate-key"><i style={{ background: PORT_COLOURS[port] }} />{port}</span>)}</p>
+    <p className="db-legend">{RATE_LANES.map(({ lane }) => <span key={lane} className="db-rate-key"><i style={{ background: LANE_COLOURS[lane] }} />{lane}</span>)}</p>
   </div>;
 }
