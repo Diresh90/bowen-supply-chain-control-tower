@@ -1,0 +1,39 @@
+/* Hand-tuned light-mode details that the generated theme can't infer. Loaded after theme-light.css. */
+
+/* Logo: shown exactly as supplied. A soft grey panel keeps the cream segment of the roundel visible. */
+:root[data-theme="light"] .sidebar{background:#ffffff;border-right:1px solid #dfe5eb}
+:root[data-theme="light"] .brand{background:#f1f3f5;border-bottom:1px solid #e3e7ec}
+
+/* Cards and panels sit on white; the page is a light grey so they stand out. */
+:root[data-theme="light"] body{background:#f4f6f9}
+
+/* Text on solid coloured buttons stays white. */
+:root[data-theme="light"] button.primary,:root[data-theme="light"] .primary{color:#ffffff}
+
+/* White cards on the light grey page. */
+:root[data-theme="light"] .dash-panel,
+:root[data-theme="light"] .db-kpi,
+:root[data-theme="light"] .dashboard-metric,
+:root[data-theme="light"] .panel,
+:root[data-theme="light"] .metric,
+:root[data-theme="light"] .modal,
+:root[data-theme="light"] .filter-panel,
+:root[data-theme="light"] .capacity-card{background:#ffffff;border-color:#e1e6ec}
+:root[data-theme="light"] .db-fit{background:#ffffff;border-color:#c9dcf0}
+:root[data-theme="light"] td{background:transparent}
+:root[data-theme="light"] .dispatch-grid .dispatch-po,:root[data-theme="light"] .dispatch-grid tfoot .dispatch-po{background:#ffffff}
+:root[data-theme="light"] .dispatch-grid thead th,:root[data-theme="light"] .dispatch-grid thead .dispatch-po,:root[data-theme="light"] .dispatch-grid tfoot td{background:#f6f8fa}
+:root[data-theme="light"] .dispatch-grid .this-week{background:#fff8e1}
+:root[data-theme="light"] .dispatch-grid thead th.this-week{color:#9a6a00}
+
+/* Tentative / awaiting confirmation stays clearly different from planned: dashed grey outline, no fill. */
+:root[data-theme="light"] .dispatch-chip.pending{background:#ffffff;border:1.5px dashed #8a99a6;color:#4a5a67}
+
+/* Light mode: dispatch status chips keep clear, readable colours. */
+:root[data-theme="light"] .dispatch-chip.status-confirmed{background:#e6f1fc;border-color:#9cc8f2;color:#0c5ea8}
+:root[data-theme="light"] .dispatch-chip.status-dispatched{background:#efeafe;border-color:#bfb0f3;color:#4b35a8}
+:root[data-theme="light"] .dispatch-chip.status-sailed{background:#e3f6f7;border-color:#93d4da;color:#11666e}
+:root[data-theme="light"] .dispatch-chip.status-arrived{background:#e9f7ef;border-color:#9fd8b6;color:#1f6b43}
+
+/* Hollow (history) points on the rate chart sit on white cards. */
+:root[data-theme="light"] .db-rate-chart{--rate-hollow:#ffffff}

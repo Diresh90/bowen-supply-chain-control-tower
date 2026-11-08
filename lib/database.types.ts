@@ -35,6 +35,9 @@ export const procurementStatuses = [
 
 export type ProcurementStatus = (typeof procurementStatuses)[number];
 
+export const orderTypes = ["Project", "Stock"] as const;
+export type OrderType = (typeof orderTypes)[number];
+
 // Kept in one place so this can be replaced by Project Manager master data later.
 export const projectManagers = [
   "Estee Evens",
@@ -56,6 +59,7 @@ export type ProcurementJob = {
   required_onsite_date: string | null;
   total_containers: number | null;
   status: ProcurementStatus | null;
+  order_type: OrderType | null;
   created_at: string;
   updated_at: string;
   suppliers: Pick<Supplier, "id" | "name" | "active"> | null;
@@ -63,6 +67,13 @@ export type ProcurementJob = {
 
 export const productionPriorities = ["Critical", "High", "Normal", "Low"] as const;
 export type ProductionPriority = (typeof productionPriorities)[number];
+
+// backward = project order planned back from the required on-site date; forward = stock order planned from production start.
+export type PlanningMode = "backward" | "forward";
+
+// Where a stage (one shipment) is up to. Dispatched = left the supplier; Arrived = on site.
+export const dispatchStatuses = ["Tentative", "Confirmed", "Dispatched", "Sailed", "Arrived"] as const;
+export type DispatchStatus = (typeof dispatchStatuses)[number];
 
 export type ProductionStage = {
   id: string;
@@ -85,6 +96,17 @@ export type ProductionStage = {
   forecast_site_eta: string;
   required_site_date: string;
   timing_status: string;
+  planning_mode: PlanningMode | null;
+  supplier_ready_date: string | null;
+  // Planned dispatch date not yet confirmed: shown on the dispatch plan, not counted against capacity.
+  tentative?: boolean;
+  dispatch_status?: DispatchStatus | null;
+  // Freight per 40ft container: USD ocean freight and surcharges, AUD local charges.
+  ocean_freight_usd?: number | null;
+  peak_season_surcharge_usd?: number | null;
+  other_surcharges_usd?: number | null;
+  local_charges_aud?: number | null;
+  usd_aud_rate?: number | null;
   allocation_override: boolean;
   created_at: string;
   updated_at: string;
