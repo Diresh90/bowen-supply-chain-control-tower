@@ -271,3 +271,7 @@ nav { padding:47px 9px 0; display:grid; gap:3px; } nav a,.settings-link { positi
 .nav-icon{display:inline-flex;align-items:center;justify-content:center;width:20px;line-height:0}
 .nav-icon svg{display:block}
 .db-rate-chart{--rate-hollow:#101d28}
+
+/* Rate chart legend items are text, not colour swatches */
+.db-legend .db-rate-key{width:auto;height:auto;border-radius:0;margin-left:0;font-size:11px}
+.db-legend .db-rate-key i{width:12px;height:3px}
