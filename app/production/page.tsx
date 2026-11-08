@@ -70,6 +70,9 @@ function FreightFields({ form, setForm }: { form: StageForm; setForm: (form: Sta
   </div></fieldset>;
 }
 
+// Columns added by migration 20261102000000 (dispatch status and freight).
+const NEW_STAGE_COLUMNS = ["dispatch_status", "ocean_freight_usd", "peak_season_surcharge_usd", "other_surcharges_usd", "local_charges_aud", "usd_aud_rate"];
+
 function scheduleReady(form: StageForm) {
   return !!form.required_site_date && (form.planning_mode === "backward" || !!form.dispatch_date);
 }
@@ -90,6 +93,7 @@ export default function ProductionPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ text: string; kind: "error" | "success" } | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true); setMessage(null);
@@ -136,7 +140,7 @@ export default function ProductionPage() {
   }
 
   function startNew() {
-    setEditing(null);
+    setEditing(null); setFormError(null);
     const lastFx = [...stages].filter(stage => stage.usd_aud_rate).sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]?.usd_aud_rate;
     setForm({ ...emptyForm, queue_sequence: String(stages.length + 1), usd_aud_rate: text(lastFx) });
     setOpen(true); setMessage(null);
@@ -152,7 +156,7 @@ export default function ProductionPage() {
   }
 
   function startEdit(stage: ProductionStage) {
-    setEditing(stage);
+    setEditing(stage); setFormError(null);
     setForm({ procurement_job_id: stage.procurement_job_id, stage_reference: stage.stage_reference, container_quantity: String(stage.container_quantity), priority: stage.priority, queue_sequence: String(stage.queue_sequence), destination: stage.destination || "", production_duration_weeks: String(stage.production_duration_weeks), dispatch_duration_weeks: String(stage.dispatch_duration_weeks), transit_duration_weeks: String(stage.transit_duration_weeks), destination_duration_weeks: String(stage.destination_duration_weeks), required_site_date: stage.required_site_date, allocation_override: stage.allocation_override, dispatch_status: stageStatusOf(stage), ocean_freight_usd: text(stage.ocean_freight_usd), peak_season_surcharge_usd: text(stage.peak_season_surcharge_usd), other_surcharges_usd: text(stage.other_surcharges_usd), local_charges_aud: text(stage.local_charges_aud), usd_aud_rate: text(stage.usd_aud_rate), ...editModeFor(stage) });
     setOpen(true); setMessage(null);
   }
@@ -160,22 +164,36 @@ export default function ProductionPage() {
   async function save(event: FormEvent) {
     event.preventDefault();
     const job = [...jobs, ...pendingJobs].find(item => item.id === form.procurement_job_id);
-    if (!job?.supplier_id) { setMessage({ text: "This procurement job must have an approved supplier before it can be planned.", kind: "error" }); return; }
+    if (!job?.supplier_id) { setFormError("This procurement job must have an approved supplier before it can be planned."); return; }
     const quantity = Number(form.container_quantity);
     const allocatedElsewhere = (allocatedByJob[job.id] || 0) - (editing?.container_quantity || 0);
     const total = job.total_containers;
     if (total !== null && allocatedElsewhere + quantity > total && !form.allocation_override) {
-      setMessage({ text: `This stage would allocate ${allocatedElsewhere + quantity} of ${total} containers. Review the warning and confirm the override to continue.`, kind: "error" });
+      setFormError(`This stage would allocate ${allocatedElsewhere + quantity} of ${total} containers. Review the warning and confirm the override to continue.`);
       return;
     }
     const schedule = scheduleFor(form);
     const payload = { procurement_job_id: job.id, supplier_id: job.supplier_id, stage_reference: form.stage_reference.trim(), container_quantity: quantity, priority: form.priority, queue_sequence: Number(form.queue_sequence), destination: form.destination.trim() || null, production_duration_weeks: Number(form.production_duration_weeks), dispatch_duration_weeks: Number(form.dispatch_duration_weeks), transit_duration_weeks: Number(form.transit_duration_weeks), destination_duration_weeks: Number(form.destination_duration_weeks), required_site_date: form.required_site_date, allocation_override: form.allocation_override, planning_mode: form.planning_mode, supplier_ready_date: form.planning_mode === "backward" ? form.dispatch_date || null : null, dispatch_status: form.dispatch_status, tentative: form.dispatch_status === "Tentative", ocean_freight_usd: money(form.ocean_freight_usd), peak_season_surcharge_usd: money(form.peak_season_surcharge_usd), other_surcharges_usd: money(form.other_surcharges_usd), local_charges_aud: money(form.local_charges_aud), usd_aud_rate: money(form.usd_aud_rate), ...schedule };
-    setSaving(true); setMessage(null);
+    setSaving(true); setMessage(null); setFormError(null);
+    const send = (body: Record<string, unknown>) => editing
+      ? supabaseRequest(`production_stages?id=eq.${editing.id}`, { method: "PATCH", body })
+      : supabaseRequest("production_stages", { method: "POST", body });
     try {
-      if (editing) await supabaseRequest(`production_stages?id=eq.${editing.id}`, { method: "PATCH", body: payload });
-      else await supabaseRequest("production_stages", { method: "POST", body: payload });
-      setOpen(false); await load(); setMessage({ text: `Production stage ${editing ? "updated" : "created"} in Supabase.`, kind: "success" });
-    } catch (error) { setMessage({ text: (error as Error).message, kind: "error" }); }
+      let skipped = false;
+      try { await send(payload); }
+      catch (error) {
+        // Before the dispatch-status / freight migration is run those columns don't exist: save everything else.
+        if (!/does not exist|schema cache/i.test((error as Error).message)) throw error;
+        const rest: Record<string, unknown> = { ...payload };
+        for (const key of NEW_STAGE_COLUMNS) delete rest[key];
+        await send(rest);
+        skipped = true;
+      }
+      setOpen(false); await load();
+      setMessage(skipped
+        ? { text: `Production stage ${editing ? "updated" : "created"}. Its dispatch status and freight weren't saved because the database update for them hasn't been run yet (migration 20261102000000).`, kind: "error" }
+        : { text: `Production stage ${editing ? "updated" : "created"} in Supabase.`, kind: "success" });
+    } catch (error) { setFormError((error as Error).message); }
     finally { setSaving(false); }
   }
 
@@ -207,7 +225,7 @@ export default function ProductionPage() {
     {tab === "dispatch" && <DispatchGrid stages={filteredStages} overrides={capacityOverrides} supplierId={supplierId} loading={loading} onEdit={startEdit} />}
     {tab === "capacity" && <CapacityView supplierId={supplierId} suppliers={productionSuppliers} stages={stages} settings={capacitySettings} overrides={capacityOverrides} ready={capacityReady} onEdit={startEdit} onRefresh={load} onMessage={setMessage} />}
 
-    {open && <div className="modal-backdrop" onMouseDown={() => !saving && setOpen(false)}><div className="modal production-modal" role="dialog" aria-modal="true" aria-labelledby="stage-title" onMouseDown={e => e.stopPropagation()}><div className="modal-head"><div><p className="eyebrow">PRODUCTION STAGE</p><h2 id="stage-title">{editing ? "Edit stage" : "Create stage"}</h2><p className="modal-context">{selectedJob ? `${jobLabel(selectedJob)} · ${selectedJob.client_name}` : "Linked procurement plan"}</p></div><button className="icon-button" aria-label="Close" onClick={() => setOpen(false)}>×</button></div><form onSubmit={save}><div className="form-grid stage-form">
+    {open && <div className="modal-backdrop" onMouseDown={() => !saving && setOpen(false)}><div className="modal production-modal" role="dialog" aria-modal="true" aria-labelledby="stage-title" onMouseDown={e => e.stopPropagation()}><div className="modal-head"><div><p className="eyebrow">PRODUCTION STAGE</p><h2 id="stage-title">{editing ? "Edit stage" : "Create stage"}</h2><p className="modal-context">{selectedJob ? `${jobLabel(selectedJob)} · ${selectedJob.client_name}` : "Linked procurement plan"}</p></div><button className="icon-button" aria-label="Close" onClick={() => setOpen(false)}>×</button></div><form onSubmit={save}>{formError && <Notice message={formError} kind="error" />}<div className="form-grid stage-form">
       <label className="full">Procurement job<select required disabled={!!editing} value={form.procurement_job_id} onChange={e => { const job = [...jobs, ...pendingJobs].find(item => item.id === e.target.value); setForm(job ? { ...form, ...newStageDefaults(job) } : { ...form, procurement_job_id: "" }); }}><option value="">Select a job</option>{[...jobs.filter(job => plannableStatuses.has(job.status || "") && job.supplier_id), ...pendingJobs.filter(job => job.supplier_id)].map(job => <option key={job.id} value={job.id}>{jobLabel(job)} — {job.client_name}{job.status === "Awaiting Confirmation" ? " (awaiting confirmation)" : ""}</option>)}</select></label>
       <label>Stage reference *<input required value={form.stage_reference} onChange={e => setForm({...form, stage_reference:e.target.value})} /></label><label>Container quantity *<input required type="number" min="1" value={form.container_quantity} onChange={e => setForm({...form, container_quantity:e.target.value})} /></label>
       <div className="planning-mode full"><strong>{form.planning_mode === "backward" ? "Project order · planned back from the on-site date" : "Stock order · planned forward from dispatch"}</strong><span>{form.planning_mode === "backward" ? "Enter the planned dispatch date to see if it lands on time." : "Enter the planned dispatch date; production start is worked out from it."}</span></div>
