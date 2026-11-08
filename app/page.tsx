@@ -5,8 +5,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { Notice } from "@/components/notice";
 import { FreightRate, OrderType, ProcurementJob, ProductionStage, Supplier, SupplierCapacityOverride } from "@/lib/database.types";
-import { AttentionItem, Severity, STANDARD_WEEKS, attentionItems, capacityRows, daysBetween, estimateNewOrder, formatDate, jobLabel, summariseJobs } from "@/lib/dashboard";
-import { capacityMonth, dateKey, mondayOf } from "@/lib/production";
+import { AttentionItem, Severity, attentionItems, capacityRows, daysBetween, formatDate, jobLabel, summariseJobs } from "@/lib/dashboard";
+import { capacityMonth } from "@/lib/production";
 import { jobStatuses, stageStatusOf, statusClass, statusColours } from "@/lib/jobs";
 import { RATE_LANES, type RateLane, type RatePoint, historicalRates, rateTrend } from "@/lib/freight";
 import { configurationError, supabaseRequest } from "@/lib/supabase";
@@ -30,7 +30,6 @@ export default function Home() {
   const [statusFilter, setStatusFilter] = useState<string>("open");
   const [managerFilter, setManagerFilter] = useState("all");
   const [capacitySupplierId, setCapacitySupplierId] = useState("");
-  const [quoteContainers, setQuoteContainers] = useState("5");
 
   const load = useCallback(async () => {
     setLoading(true); setMessage(null);
@@ -72,14 +71,12 @@ export default function Home() {
   const arriving = stages.filter(stage => !["Tentative", "Arrived"].includes(stageStatusOf(stage)) && stage.forecast_site_eta >= today && stage.forecast_site_eta <= arrivingLimit);
   const arrivingOrders = new Set(arriving.map(stage => stage.procurement_job_id)).size;
 
-  // Capacity chart and new-order estimate
+  // Capacity chart
   const capacityRow = capacity.find(row => row.supplier.id === capacitySupplierId) ?? capacity[0];
   const chartMonths = capacityRow?.months.slice(0, CHART_MONTHS) ?? [];
   const chartMax = Math.max(1, ...chartMonths.map(m => Math.max(m.capacity ?? 0, m.planned)));
   // Months a new order could still use: from next month onward.
   const freeSoon = capacityRow?.months.slice(1, 4) ?? [];
-  const quoteQty = Math.max(1, Math.round(Number(quoteContainers) || 1));
-  const estimate = estimateNewOrder(capacityRow, quoteQty, today);
 
   // Rate trend: the last 12 months and the next 2.
   const monthKey = (offset: number) => { const d = new Date(`${today}T00:00:00Z`); return capacityMonth(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + offset, 1))); };
@@ -114,23 +111,8 @@ export default function Home() {
       <article className="db-kpi purple"><span>Free capacity · next 3 months</span><strong>{show(freeSoon.reduce((n, m) => n + Math.max(0, m.free ?? 0), 0))}</strong><small>{show(freeSoon.length ? freeSoon.map(m => `${m.label.slice(0, 3)}: ${m.free === null ? "not set" : Math.max(0, m.free)}`).join(" · ") : "No capacity set")}</small></article>
     </section>
 
-    <section className="dash-panel db-fit">
-      <div className="db-fit-ask">
-        <span>Can we fit</span>
-        <input aria-label="Containers" type="number" min="1" step="1" value={quoteContainers} onChange={e => setQuoteContainers(e.target.value)} />
-        <span>containers{capacity.length > 1 ? " at" : "?"}</span>
-        {capacity.length > 1 && <><select aria-label="Supplier" value={capacityRow?.supplier.id} onChange={e => setCapacitySupplierId(e.target.value)}>{capacity.map(row => <option key={row.supplier.id} value={row.supplier.id}>{row.supplier.name}</option>)}</select><span>?</span></>}
-      </div>
-      {!ready ? <div className="db-fit-answer">Checking capacity…</div> : estimate.etd === null
-        ? <div className="db-fit-answer no"><strong>Not in a single month</strong><span>{estimate.reason} Try fewer containers, or split the order across months.</span></div>
-        : <div className="db-fit-answer yes">
-          <strong>Yes · dispatches {estimate.month} (W/C {formatDate(dateKey(mondayOf(new Date(`${estimate.dispatch}T00:00:00Z`))))}), sails about {formatDate(estimate.etd)}</strong>
-          <span>Earliest on site <b>{formatDate(estimate.onSite)}</b> · {estimate.free - quoteQty} containers left in {estimate.month} after this order</span>
-        </div>}
-      <small className="db-fit-basis">Uses the capacity and planned stages from Production. Lead time {STANDARD_WEEKS.production} wks production + {STANDARD_WEEKS.dispatch} wks loading and origin transport, then {STANDARD_WEEKS.transit} wks sea + {STANDARD_WEEKS.delivery} wk delivery. Confirm with production before quoting.</small>
-    </section>
-
-    <section className="dash-panel db-capacity db-capacity-full">
+    <section className="db-side-by-side">
+    <article className="dash-panel db-capacity">
         <div className="db-panel-head"><div><h2>Capacity outlook</h2><p>Containers planned against monthly capacity, by planned dispatch month (tentative included).</p></div>
           {capacity.length > 1 && <select aria-label="Supplier" value={capacityRow?.supplier.id} onChange={e => setCapacitySupplierId(e.target.value)}>{capacity.map(row => <option key={row.supplier.id} value={row.supplier.id}>{row.supplier.name}</option>)}</select>}
         </div>
@@ -152,12 +134,13 @@ export default function Home() {
           <p className="db-legend"><span className="db-key planned" /> Planned <span className="db-key limit" /> Capacity · <span className="db-key near" /> 80%+ used <span className="db-key over" /> Full / over</p>
         </>}
         <Link className="db-panel-link" href="/production">Manage capacity →</Link>
-    </section>
+    </article>
 
-    <section className="dash-panel db-rates db-rates-full">
-      <h2>40ft sea freight rates into Melbourne</h2>
-      <p className="db-panel-note">USD per 40ft container, all-in sea freight. Solid points are rates you entered on the Dispatch Plan; hollow points are imported market history.</p>
+    <article className="dash-panel db-rates db-rates-compact">
+      <h2>40ft rates into Melbourne</h2>
+      <p className="db-panel-note">USD per container, all-in sea freight · solid = your entered rates, hollow = market history.</p>
       {!ready ? <div className="empty">Loading…</div> : trend.length === 0 ? <div className="db-freight-empty">No rates yet. Import market history or enter ocean freight on stages to start the trend.</div> : <RateChart months={trendMonths} points={trend} />}
+    </article>
     </section>
 
     <section className="dash-panel all-jobs">
@@ -206,7 +189,7 @@ const LANE_COLOURS: Record<RateLane, string> = { "Nhava Sheva → MEL": "#f0a020
 
 // Line per destination port; points are monthly average USD rates per 40ft container.
 function RateChart({ months, points }: { months: string[]; points: RatePoint[] }) {
-  const width = 1000, height = 340, left = 56, right = 70, top = 16, bottom = 30;
+  const width = 620, height = 260, left = 48, right = 58, top = 14, bottom = 26;
   const values = points.map(p => p.rateUsd);
   const min = Math.floor(Math.min(...values) * 0.9 / 100) * 100, max = Math.ceil(Math.max(...values) * 1.1 / 100) * 100 || 100;
   const x = (month: string) => left + months.indexOf(month) * ((width - left - right) / Math.max(1, months.length - 1));
