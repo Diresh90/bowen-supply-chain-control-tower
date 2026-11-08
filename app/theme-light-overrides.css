@@ -34,3 +34,6 @@
 :root[data-theme="light"] .dispatch-chip.status-dispatched{background:#efeafe;border-color:#bfb0f3;color:#4b35a8}
 :root[data-theme="light"] .dispatch-chip.status-sailed{background:#e3f6f7;border-color:#93d4da;color:#11666e}
 :root[data-theme="light"] .dispatch-chip.status-arrived{background:#e9f7ef;border-color:#9fd8b6;color:#1f6b43}
+
+/* Hollow (history) points on the rate chart sit on white cards. */
+:root[data-theme="light"] .db-rate-chart{--rate-hollow:#ffffff}

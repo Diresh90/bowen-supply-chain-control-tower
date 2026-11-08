@@ -393,3 +393,4 @@
 :root[data-theme="light"] .db-legend .db-key.spend-tentative{background:repeating-linear-gradient(45deg,#4122a6 0 2px,transparent 2px 4px)}
 :root[data-theme="light"] .db-rate-chart text{fill:#576571}
 :root[data-theme="light"] .db-rate-chart .grid{stroke:#bdcdd9}
+:root[data-theme="light"] .db-rate-chart{--rate-hollow:#ebf2f7}

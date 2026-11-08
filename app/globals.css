@@ -270,3 +270,4 @@ nav { padding:47px 9px 0; display:grid; gap:3px; } nav a,.settings-link { positi
 /* Sidebar icons (Lucide line icons) */
 .nav-icon{display:inline-flex;align-items:center;justify-content:center;width:20px;line-height:0}
 .nav-icon svg{display:block}
+.db-rate-chart{--rate-hollow:#101d28}

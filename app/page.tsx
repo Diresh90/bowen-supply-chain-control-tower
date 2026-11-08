@@ -4,11 +4,11 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { Notice } from "@/components/notice";
-import { OrderType, ProcurementJob, ProductionStage, Supplier, SupplierCapacityOverride } from "@/lib/database.types";
+import { FreightRate, OrderType, ProcurementJob, ProductionStage, Supplier, SupplierCapacityOverride } from "@/lib/database.types";
 import { AttentionItem, Severity, STANDARD_WEEKS, attentionItems, capacityRows, daysBetween, estimateNewOrder, formatDate, jobLabel, summariseJobs } from "@/lib/dashboard";
 import { capacityMonth, dateKey, mondayOf } from "@/lib/production";
 import { jobStatuses, stageStatusOf, statusClass, statusColours } from "@/lib/jobs";
-import { DESTINATION_PORTS, ORIGIN_PORT, rateTrend, spendByMonth } from "@/lib/freight";
+import { DESTINATION_PORTS, ORIGIN_PORT, type RatePoint, historicalRates, rateTrend, spendByMonth } from "@/lib/freight";
 import { configurationError, supabaseRequest } from "@/lib/supabase";
 
 const severityLabel: Record<Severity, string> = { high: "Act now", medium: "Check", low: "Follow up" };
@@ -20,6 +20,7 @@ export default function Home() {
   const [stages, setStages] = useState<ProductionStage[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [capacities, setCapacities] = useState<SupplierCapacityOverride[]>([]);
+  const [rateHistory, setRateHistory] = useState<RatePoint[]>([]);
   const [capacityAvailable, setCapacityAvailable] = useState(true);
   const [loading, setLoading] = useState(true);
   const [loadedAt, setLoadedAt] = useState<Date | null>(null);
@@ -41,7 +42,9 @@ export default function Home() {
       supabaseRequest<Supplier[]>("suppliers?select=*&active=eq.true&order=name.asc"),
       supabaseRequest<SupplierCapacityOverride[]>("supplier_capacity_overrides?select=*"),
     ]);
-    const [coreResult, capacityResult] = await Promise.allSettled([coreData, capacityData]);
+    const rateData = supabaseRequest<FreightRate[]>("freight_rates?select=*,destination:locations!freight_rates_destination_location_id_fkey(*)&origin_code=eq.NSA&order=rate_month.asc");
+    const [coreResult, capacityResult, rateResult] = await Promise.allSettled([coreData, capacityData, rateData]);
+    setRateHistory(rateResult.status === "fulfilled" ? historicalRates(rateResult.value) : []);
     if (coreResult.status === "fulfilled") {
       const [jobRows, stageRows] = coreResult.value;
       setJobs(jobRows); setStages(stageRows);
@@ -83,8 +86,8 @@ export default function Home() {
   const spendMonths = spendByMonth(stages.map(stage => ({ ...stage, isTentative: stageStatusOf(stage) === "Tentative" })), [-3, -2, -1, 0, 1, 2].map(monthKey));
   const spendMax = Math.max(1, ...spendMonths.map(m => m.totalAud));
   const missingFx = spendMonths.reduce((n, m) => n + m.missingFx, 0);
-  const trendMonths = [-5, -4, -3, -2, -1, 0, 1, 2].map(monthKey);
-  const trend = rateTrend(stages).filter(point => trendMonths.includes(point.month));
+  const trendMonths = [-11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1, 0, 1, 2].map(monthKey);
+  const trend = rateTrend(stages, rateHistory).filter(point => trendMonths.includes(point.month));
   const aud = new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 });
 
   // Orders table
@@ -174,7 +177,7 @@ export default function Home() {
 
       <article className="dash-panel db-rates">
         <h2>40ft rate trend · {ORIGIN_PORT}</h2>
-        <p className="db-panel-note">USD per container (ocean freight + peak season + other surcharges), averaged by dispatch month.</p>
+        <p className="db-panel-note">USD per container, all-in sea freight. Solid points are rates you entered on the Dispatch Plan; hollow points are imported market history.</p>
         {!ready ? <div className="empty">Loading…</div> : trend.length === 0 ? <div className="db-freight-empty">No rates yet. Enter ocean freight on stages to start the trend.</div> : <RateChart months={trendMonths} points={trend} />}
       </article>
     </section>
@@ -249,7 +252,7 @@ export default function Home() {
 const PORT_COLOURS: Record<string, string> = { Brisbane: "#378add", Sydney: "#1d9e75", Melbourne: "#d85a30" };
 
 // Line per destination port; points are monthly average USD rates per 40ft container.
-function RateChart({ months, points }: { months: string[]; points: { month: string; port: string; rateUsd: number; containers: number }[] }) {
+function RateChart({ months, points }: { months: string[]; points: RatePoint[] }) {
   const width = 520, height = 170, left = 46, right = 12, top = 12, bottom = 26;
   const values = points.map(p => p.rateUsd);
   const min = Math.floor(Math.min(...values) * 0.9 / 100) * 100, max = Math.ceil(Math.max(...values) * 1.1 / 100) * 100 || 100;
@@ -266,7 +269,7 @@ function RateChart({ months, points }: { months: string[]; points: { month: stri
         if (!line.length) return null;
         return <g key={port} style={{ color: PORT_COLOURS[port] }}>
           {line.length > 1 && <polyline fill="none" stroke="currentColor" strokeWidth="2.5" points={line.map(p => `${x(p.month)},${y(p.rateUsd)}`).join(" ")} />}
-          {line.map(p => <circle key={p.month} cx={x(p.month)} cy={y(p.rateUsd)} r="4" fill="currentColor"><title>{`${port} · ${label(p.month)}: ${usd.format(p.rateUsd)} per 40ft (${p.containers} ctns)`}</title></circle>)}
+          {line.map(p => <circle key={p.month} cx={x(p.month)} cy={y(p.rateUsd)} r="4" fill={p.source === "entered" ? "currentColor" : "var(--rate-hollow, #0b1620)"} stroke="currentColor" strokeWidth="2"><title>{`${port} · ${label(p.month)}: ${usd.format(p.rateUsd)} per 40ft · ${p.source === "entered" ? `entered (${p.containers} ctns)` : "market history"}`}</title></circle>)}
         </g>;
       })}
     </svg>
