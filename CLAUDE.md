@@ -60,7 +60,8 @@ Notes:
 
 - Since 2026-11-10 the app uses Supabase project **bowen-control-tower** (ref `pdzbjablqxuegdwdseue`, Sydney) in **Diresh90's Org**. The Supabase connector in Claude is authorised for that org, so migrations can be applied with the Supabase tools.
 - The old project `supabase-cinnabar-crystal` (ref `zjdnvvlgjizzodxjybxm`, Vercel-managed org) is kept untouched as a backup. Its database login is broken ("PAM authentication failed"). Do not point anything back at it; the user deletes it once happy.
-- The Vercel env vars `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` were edited to the new project, but they are still tagged to the old Vercel–Supabase integration. Until that integration is removed from the Vercel project, pass both values with `--build-env` on every deploy and check the built JS chunk contains `pdzbjablqxuegdwdseue`.
+- In Vercel, `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` are plain (encrypted) project env vars for Production and Preview, pointing at the new project. A normal `vercel deploy` picks them up; no overrides needed.
+- The other `SUPABASE_*` / `POSTGRES_*` vars in Vercel still come from the old Vercel–Supabase integration and point at the old project. The app does not use them. They go away when the old project and its integration are removed.
 
 ## Environment variables
 
