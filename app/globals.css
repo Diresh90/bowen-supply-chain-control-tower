@@ -295,3 +295,20 @@ nav { padding:47px 9px 0; display:grid; gap:3px; } nav a,.settings-link { positi
 .db-rates-compact .db-rate-chart text{font-size:12px}
 .db-rates-compact .db-rate-chart text.db-rate-end{font-size:13px;font-weight:700}
 @media(max-width:1100px){.db-side-by-side{grid-template-columns:1fr}}
+
+/* Login */
+.login-page{min-height:100vh;display:grid;place-items:center;padding:24px 16px}
+.login-card{width:min(100%,380px);display:grid;gap:16px;background:#101e29;border:1px solid #2a3c49;border-radius:10px;padding:30px 28px 26px;color:#edf1f4}
+.login-logo{display:grid;place-items:center;padding:10px 12px;border-radius:7px}
+.login-logo img{width:190px;height:auto}
+.login-card h1{margin:4px 0 0;font-size:20px;text-align:center}
+.login-note{margin:-8px 0 4px;text-align:center;color:#8fa0ae;font-size:12px}
+.login-card label{display:grid;gap:7px;color:#b9c4cc;font-size:11px;font-weight:700}
+.login-card input{width:100%;color:#edf1f4;background:#0a1620;border:1px solid #334754;border-radius:5px;padding:11px 12px;outline:none}
+.login-card input:focus{border-color:#168bed}
+.login-card .primary{padding:12px 15px;font-size:13px}
+.login-card .primary:disabled{opacity:.6;cursor:wait}
+.login-error{margin:0;padding:10px 12px;border-radius:6px;background:#3b1920;color:#ff9ea2;border:1px solid #75313a;font-size:12px}
+.login-help{margin:0;text-align:center;color:#82909b;font-size:11px}
+.sign-out{display:inline-flex;align-items:center;gap:6px;border:1px solid #2b3b47;background:#142431;color:#d9e1e8;border-radius:6px;padding:7px 10px;font-size:11px}
+.sign-out:hover{border-color:#168bed}

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { AuthGate } from "@/components/auth-gate";
 
 import "./globals.css";
 import "./theme-light.css";
@@ -17,7 +18,7 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
   return (
     <html lang="en" suppressHydrationWarning>
       <head><script dangerouslySetInnerHTML={{ __html: themeScript }} /></head>
-      <body>{children}</body>
+      <body><AuthGate>{children}</AuthGate></body>
     </html>
   );
 }

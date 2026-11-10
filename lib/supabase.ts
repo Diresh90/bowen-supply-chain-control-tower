@@ -1,3 +1,5 @@
+import { getAccessToken, sessionRejected } from "@/lib/auth";
+
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
@@ -25,12 +27,14 @@ export async function supabaseRequest<T>(path: string, options: RequestOptions =
   if (configError) throw new Error(configError);
 
   const method = options.method ?? "GET";
+  // Signed-in users send their own token; the database only serves signed-in Bowen users.
+  const userToken = await getAccessToken();
   const send = () =>
     fetch(`${supabaseUrl}/rest/v1/${path}`, {
       method,
       headers: {
         apikey: supabaseKey!,
-        Authorization: `Bearer ${supabaseKey}`,
+        Authorization: `Bearer ${userToken ?? supabaseKey}`,
         "Content-Type": "application/json",
         Prefer: options.prefer ?? "return=representation",
       },
@@ -50,6 +54,8 @@ export async function supabaseRequest<T>(path: string, options: RequestOptions =
   }
 
   if (!response.ok) {
+    // A rejected sign-in token (expired, or the account was removed) sends the user back to the login screen.
+    if (response.status === 401 && userToken) sessionRejected();
     const details = (await response.json().catch(() => null)) as
       | { message?: string; details?: string; hint?: string }
       | null;
