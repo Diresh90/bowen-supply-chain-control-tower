@@ -394,3 +394,12 @@
 :root[data-theme="light"] .db-rate-chart text{fill:#576571}
 :root[data-theme="light"] .db-rate-chart .grid{stroke:#bdcdd9}
 :root[data-theme="light"] .db-rate-chart{--rate-hollow:#ebf2f7}
+:root[data-theme="light"] .login-card{background:#ebf2f7;border:1px solid #b6c8d5;color:#0b0f12}
+:root[data-theme="light"] .login-note{color:#516270}
+:root[data-theme="light"] .login-card label{color:#333e46}
+:root[data-theme="light"] .login-card input{color:#0b0f12;background:#eff5fa;border:1px solid #abbfcc}
+:root[data-theme="light"] .login-card input:focus{border-color:#1387e8}
+:root[data-theme="light"] .login-error{background:#f3e2e5;color:#5a070b;border:1px solid #ce8a93}
+:root[data-theme="light"] .login-help{color:#64727d}
+:root[data-theme="light"] .sign-out{border:1px solid #b8c8d4;background:#e7eff5;color:#171f26}
+:root[data-theme="light"] .sign-out:hover{border-color:#1387e8}

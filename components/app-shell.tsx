@@ -4,8 +4,10 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
-import { Bell, CalendarDays, ClipboardList, Container, Factory, FileText, Handshake, LayoutDashboard, Settings, Ship, type LucideIcon } from "lucide-react";
+import { Bell, CalendarDays, ClipboardList, Container, Factory, FileText, Handshake, LayoutDashboard, LogOut, Settings, Ship, type LucideIcon } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { useSession } from "@/components/auth-gate";
+import { signOut } from "@/lib/auth";
 
 // Icons describe what each section is for: overview, orders, supplier production, sea freight, supplier relationships.
 const navigation: [string, LucideIcon, string][] = [
@@ -19,8 +21,15 @@ const navigation: [string, LucideIcon, string][] = [
 const comingSoon: [LucideIcon, string][] = [[Container, "Containers"], [Bell, "Alerts / Actions"], [CalendarDays, "Calendar"], [FileText, "Documents"]];
 const ICON = { size: 18, strokeWidth: 1.8, "aria-hidden": true } as const;
 
+function displayName(email: string) {
+  const name = email.split("@")[0].split(/[._-]/)[0] || email;
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const email = useSession()?.email ?? "";
+  const name = displayName(email);
   return (
     <div className="app-frame">
       <aside className="sidebar">
@@ -50,8 +59,9 @@ export function AppShell({ children }: { children: ReactNode }) {
       <main className="content">
         <div className="topbar">
           <ThemeToggle />
-          <span className="user-name">Diresh</span>
-          <span className="avatar" aria-label="User profile">D</span>
+          <span className="user-name" title={email}>{name}</span>
+          <span className="avatar" aria-label={`Signed in as ${email}`}>{name.charAt(0)}</span>
+          <button type="button" className="sign-out" onClick={() => void signOut()} title="Sign out"><LogOut size={15} aria-hidden="true" /> Sign out</button>
         </div>
         {children}
       </main>

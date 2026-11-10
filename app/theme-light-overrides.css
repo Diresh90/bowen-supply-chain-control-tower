@@ -37,3 +37,6 @@
 
 /* Hollow (history) points on the rate chart sit on white cards. */
 :root[data-theme="light"] .db-rate-chart{--rate-hollow:#ffffff}
+
+/* Login: logo sits on the same soft grey panel as the sidebar so the cream segment stays visible */
+:root[data-theme="light"] .login-logo{background:#f1f3f5;border:1px solid #e3e7ec}
