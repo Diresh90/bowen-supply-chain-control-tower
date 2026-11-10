@@ -56,6 +56,13 @@ Notes:
 - PowerShell script execution is disabled, so call the `.cmd` shims: `npm.cmd`, `vercel.cmd`.
 - A corporate proxy intercepts TLS. Set `NODE_OPTIONS=--use-system-ca` before running the Vercel CLI, or it fails with "unable to verify the first certificate".
 
+## Database (Supabase)
+
+- Since 2026-11-10 the app uses Supabase project **bowen-control-tower** (ref `pdzbjablqxuegdwdseue`, Sydney) in **Diresh90's Org**. The Supabase connector in Claude is authorised for that org, so migrations can be applied with the Supabase tools.
+- The old project `supabase-cinnabar-crystal` (ref `zjdnvvlgjizzodxjybxm`, Vercel-managed org) is kept untouched as a backup. Its database login is broken ("PAM authentication failed"). Do not point anything back at it; the user deletes it once happy.
+- In Vercel, `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` are plain (encrypted) project env vars for Production and Preview, pointing at the new project. A normal `vercel deploy` picks them up; no overrides needed.
+- The other `SUPABASE_*` / `POSTGRES_*` vars in Vercel still come from the old Vercel–Supabase integration and point at the old project. The app does not use them. They go away when the old project and its integration are removed.
+
 ## Environment variables
 
 - The app reads `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
