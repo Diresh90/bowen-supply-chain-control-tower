@@ -28,7 +28,8 @@ const monthName = (key: string) => new Intl.DateTimeFormat("en-GB", { month: "sh
 
 // Planning board: one row per PO / stage, one column per dispatch week, capacity per month across the top.
 // Every stage with a planned dispatch date counts against that month's capacity, tentative or not.
-export function DispatchGrid({ stages, overrides, supplierId, loading, onEdit }: { stages: ProductionStage[]; overrides: SupplierCapacityOverride[]; supplierId: string; loading: boolean; onEdit: (stage: ProductionStage) => void }) {
+// Without onEdit the grid is read-only (supplier page): numbers are shown but cannot be opened.
+export function DispatchGrid({ stages, overrides, supplierId, loading, onEdit }: { stages: ProductionStage[]; overrides: SupplierCapacityOverride[]; supplierId: string; loading: boolean; onEdit?: (stage: ProductionStage) => void }) {
   const today = dateKey(new Date());
   const now = new Date(`${today}T00:00:00Z`);
   const firstMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
@@ -63,7 +64,7 @@ export function DispatchGrid({ stages, overrides, supplierId, loading, onEdit }:
   const weekTotal = (week: string) => rows.filter(r => weekOf(r.date) === week).reduce((n, r) => n + r.containers, 0);
 
   return <section className="panel dispatch-panel">
-    <div className="panel-title"><div><h2>Dispatch weeks</h2><p>Containers by the week they leave the supplier, with capacity for this month and the next two. Every planned dispatch counts toward capacity. Select a number to edit it.</p></div></div>
+    <div className="panel-title"><div><h2>Dispatch weeks</h2><p>Containers by the week they leave the supplier, with capacity for this month and the next two. Every planned dispatch counts toward capacity.{onEdit ? " Select a number to edit it." : ""}</p></div></div>
     <div className="table-wrap"><table className="dispatch-grid">
       <thead>
         <tr><th rowSpan={2} className="dispatch-po">PO / job</th>{months.map(m => {
@@ -81,8 +82,13 @@ export function DispatchGrid({ stages, overrides, supplierId, loading, onEdit }:
           const rowWeek = weekOf(row.date);
           return <tr key={row.id} className={row.status === "Tentative" ? "pending-row" : ""}>
             <td className="dispatch-po"><strong>{row.po}</strong><small>{row.detail}</small></td>
-            {weeks.map(w => <td key={w} className={w === thisWeek ? "this-week" : ""}>{w === rowWeek &&
-              <button className={`dispatch-chip status-${row.status.toLowerCase()}${row.status === "Tentative" ? " pending tentative" : ""}`} onClick={() => onEdit(row.stage)} title={`${row.status} · planned dispatch ${row.date}`}>{row.containers}</button>}</td>)}
+            {weeks.map(w => {
+              const chipClass = `dispatch-chip status-${row.status.toLowerCase()}${row.status === "Tentative" ? " pending tentative" : ""}`;
+              const title = `${row.status} · planned dispatch ${row.date}`;
+              return <td key={w} className={w === thisWeek ? "this-week" : ""}>{w === rowWeek && (onEdit
+                ? <button className={chipClass} onClick={() => onEdit(row.stage)} title={title}>{row.containers}</button>
+                : <span className={`${chipClass} read-only`} title={title}>{row.containers}</span>)}</td>;
+            })}
             <td className="dispatch-total">{row.containers}</td>
           </tr>;
         })}
