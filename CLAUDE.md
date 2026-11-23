@@ -59,16 +59,21 @@ Notes:
 ## Database (Supabase)
 
 - Since 2026-11-10 the app uses Supabase project **bowen-control-tower** (ref `pdzbjablqxuegdwdseue`, Sydney) in **Diresh90's Org**. The Supabase connector in Claude is authorised for that org, so migrations can be applied with the Supabase tools.
-- The old project `supabase-cinnabar-crystal` (ref `zjdnvvlgjizzodxjybxm`, Vercel-managed org) is kept untouched as a backup. Its database login is broken ("PAM authentication failed"). Do not point anything back at it; the user deletes it once happy.
+- The old Vercel-managed project `supabase-cinnabar-crystal` and its Vercel–Supabase integration were deleted on 2026-11-23 (the stale integration was blocking every deploy with "integration resources failed to provision").
 - In Vercel, `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` are plain (encrypted) project env vars for Production and Preview, pointing at the new project. A normal `vercel deploy` picks them up; no overrides needed.
-- The other `SUPABASE_*` / `POSTGRES_*` vars in Vercel still come from the old Vercel–Supabase integration and point at the old project. The app does not use them. They go away when the old project and its integration are removed.
 
 ## Login and access
 
 - The app has its own login (Supabase Auth, email + password): `components/auth-gate.tsx` wraps every page, `lib/auth.ts` holds the session, `lib/supabase.ts` sends the user's token.
-- Only `@bowenstorage.com.au` accounts. Accounts are created by the user in Supabase → Authentication → Users (public sign-up is off).
+- Accounts are created by the user in Supabase → Authentication → Users (public sign-up is off). `@bowenstorage.com.au` accounts get the full app; any other account gets the supplier portal.
 - Database rules (migration `20261110000000_require_bowen_login.sql`): every table is readable/writable only by signed-in Bowen users; the anon key has no table access. New tables must get the same `public.is_bowen_user()` policies, or the app cannot see them.
 - The production URL is public (it shows the login screen). Vercel Authentication stays on for **preview** deployments only.
+
+## Supplier portal
+
+- Non-Bowen accounts see only `components/supplier-portal.tsx`: a read-only dispatch weeks grid for their own supplier (no sidebar, no other pages, whatever URL they open).
+- Data comes only from `public.supplier_portal()` (migration `20261123000000_supplier_portal.sql`), a security-definer function returning PO, client, stage, containers, planned dispatch date, status, destination, required on-site date and monthly capacity. Supplier accounts have no direct table access. **Never add freight costs, FX, sales order numbers or other suppliers' data to it.**
+- Supplier ↔ email domain links live in `public.supplier_access_domains` (currently `craftsmanautomation.com` → Craftsman Automation). A new supplier needs one row there.
 
 ## Environment variables
 
