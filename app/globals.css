@@ -312,3 +312,17 @@ nav { padding:47px 9px 0; display:grid; gap:3px; } nav a,.settings-link { positi
 .login-help{margin:0;text-align:center;color:#82909b;font-size:11px}
 .sign-out{display:inline-flex;align-items:center;gap:6px;border:1px solid #2b3b47;background:#142431;color:#d9e1e8;border-radius:6px;padding:7px 10px;font-size:11px}
 .sign-out:hover{border-color:#168bed}
+
+/* Supplier portal (read-only) */
+.portal-page{max-width:1500px;margin:0 auto;padding:0 20px 40px}
+.portal-header{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;padding:18px 0;border-bottom:1px solid #1a2935;margin-bottom:18px}
+.portal-brand{display:flex;align-items:center;gap:16px}
+.portal-logo{display:grid;place-items:center;padding:6px 10px;border-radius:7px}
+.portal-logo img{width:150px;height:auto}
+.portal-brand h1{margin:2px 0 0;font-size:24px}
+.portal-brand .eyebrow{margin:0}
+.portal-actions{display:flex;align-items:center;gap:12px}
+.portal-user{font-size:12px;color:#8fa0ae}
+.portal-intro{margin:0 0 18px;color:#8fa0ae;font-size:13px}
+.dispatch-chip.read-only{cursor:default}
+@media(max-width:760px){.portal-page{padding:0 16px 30px}.portal-user{display:none}.portal-logo img{width:110px}.portal-brand h1{font-size:19px}}

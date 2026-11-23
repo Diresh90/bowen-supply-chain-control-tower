@@ -2,7 +2,8 @@
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { LoginScreen } from "@/components/login-screen";
-import { onSessionChange, readSession, type Session } from "@/lib/auth";
+import { SupplierPortal } from "@/components/supplier-portal";
+import { isBowenEmail, onSessionChange, readSession, type Session } from "@/lib/auth";
 
 const SessionContext = createContext<Session | null>(null);
 
@@ -23,6 +24,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   if (session === undefined) return null;
   if (session === null) return <LoginScreen />;
+  // Supplier staff only ever get their read-only plan, whatever page address they open.
+  // (The database enforces this too: non-Bowen accounts cannot read any table.)
+  if (!isBowenEmail(session.email)) return <SupplierPortal key={session.email} email={session.email} />;
   // Keyed by user so signing in as someone else remounts the pages with fresh data.
   return <SessionContext.Provider value={session} key={session.email}>{children}</SessionContext.Provider>;
 }

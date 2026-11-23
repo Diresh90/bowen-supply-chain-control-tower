@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useState, type FormEvent } from "react";
-import { ALLOWED_EMAIL_DOMAIN, signIn } from "@/lib/auth";
+import { signIn } from "@/lib/auth";
 
 export function LoginScreen() {
   const [email, setEmail] = useState("");
@@ -29,10 +29,10 @@ export function LoginScreen() {
           <Image src="/bowen-logo.svg" alt="Bowen Engineered Storage Systems" width={741} height={227} priority />
         </div>
         <h1>Supply Chain Control Tower</h1>
-        <p className="login-note">Sign in with your Bowen account.</p>
+        <p className="login-note">Sign in with the account Bowen set up for you.</p>
         <label>
           Email
-          <input type="email" autoComplete="username" required placeholder={`name@${ALLOWED_EMAIL_DOMAIN}`} value={email} onChange={(event) => setEmail(event.target.value)} />
+          <input type="email" autoComplete="username" required placeholder="you@company.com" value={email} onChange={(event) => setEmail(event.target.value)} />
         </label>
         <label>
           Password
@@ -40,7 +40,7 @@ export function LoginScreen() {
         </label>
         {error && <p className="login-error" role="alert">{error}</p>}
         <button className="primary" type="submit" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
-        <p className="login-help">No account yet? Ask your administrator to add you.</p>
+        <p className="login-help">No account yet? Ask your Bowen contact to add you.</p>
       </form>
     </main>
   );

@@ -40,3 +40,6 @@
 
 /* Login: logo sits on the same soft grey panel as the sidebar so the cream segment stays visible */
 :root[data-theme="light"] .login-logo{background:#f1f3f5;border:1px solid #e3e7ec}
+
+/* Supplier portal: logo on the soft grey panel so the cream segment stays visible */
+:root[data-theme="light"] .portal-logo{background:#f1f3f5;border:1px solid #e3e7ec}

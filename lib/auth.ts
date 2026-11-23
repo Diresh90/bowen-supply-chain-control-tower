@@ -7,7 +7,7 @@ const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const STORAGE_KEY = "bowen-auth-session";
 const REFRESH_MARGIN_SECONDS = 60;
 
-/** Only these email domains may use the app (also enforced by the database rules). */
+/** Bowen staff email domain: full access (enforced by the database rules). */
 export const ALLOWED_EMAIL_DOMAIN = "bowenstorage.com.au";
 
 export type Session = {
@@ -79,13 +79,15 @@ function toSession(data: TokenResponse, fallbackEmail: string): Session {
   };
 }
 
-export function isAllowedEmail(email: string) {
+/** Bowen staff get the full app; anyone else (supplier staff) gets the read-only supplier page. */
+export function isBowenEmail(email: string) {
   return email.trim().toLowerCase().endsWith(`@${ALLOWED_EMAIL_DOMAIN}`);
 }
 
+// Any account Bowen created may sign in (public sign-up is off). What each account can see is
+// decided by the database: Bowen emails see everything, supplier domains see only their own plan.
 export async function signIn(email: string, password: string) {
   const cleanEmail = email.trim().toLowerCase();
-  if (!isAllowedEmail(cleanEmail)) throw new Error(`Use your @${ALLOWED_EMAIL_DOMAIN} email address.`);
   try {
     const data = await tokenRequest("password", { email: cleanEmail, password });
     const session = toSession(data, cleanEmail);
