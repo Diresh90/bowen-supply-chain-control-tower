@@ -63,6 +63,13 @@ Notes:
 - In Vercel, `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` are plain (encrypted) project env vars for Production and Preview, pointing at the new project. A normal `vercel deploy` picks them up; no overrides needed.
 - The other `SUPABASE_*` / `POSTGRES_*` vars in Vercel still come from the old Vercel–Supabase integration and point at the old project. The app does not use them. They go away when the old project and its integration are removed.
 
+## Login and access
+
+- The app has its own login (Supabase Auth, email + password): `components/auth-gate.tsx` wraps every page, `lib/auth.ts` holds the session, `lib/supabase.ts` sends the user's token.
+- Only `@bowenstorage.com.au` accounts. Accounts are created by the user in Supabase → Authentication → Users (public sign-up is off).
+- Database rules (migration `20261110000000_require_bowen_login.sql`): every table is readable/writable only by signed-in Bowen users; the anon key has no table access. New tables must get the same `public.is_bowen_user()` policies, or the app cannot see them.
+- The production URL is public (it shows the login screen). Vercel Authentication stays on for **preview** deployments only.
+
 ## Environment variables
 
 - The app reads `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
